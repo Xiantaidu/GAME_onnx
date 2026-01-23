@@ -228,7 +228,7 @@ class BaseLightningModule(lightning.pytorch.LightningModule, abc.ABC):
             self.train_dataset,
             max_batch_size=dataloader_config.max_batch_size,
             max_batch_frames=dataloader_config.max_batch_frames,
-            sort_by_len=False,
+            sort_by_len=True,
             frame_count_grid=dataloader_config.frame_count_grid,
             batch_count_multiple_of=self.training_config.trainer.accumulate_grad_batches,
             reassign_batches=True,
