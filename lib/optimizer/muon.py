@@ -4,7 +4,25 @@ import torch.nn.functional as F
 from torch import Tensor
 
 
-def zeropower_via_newtonschulz5(G: Tensor, steps: int) -> Tensor:
+def get_bf16_support_map():
+    bf16_support_map = {}
+
+    if not torch.cuda.is_available():
+        return bf16_support_map
+
+    device_count = torch.cuda.device_count()
+    if device_count == 0:
+        return bf16_support_map
+
+    for i in range(device_count):
+        device = torch.device(f'cuda:{i}')
+        major, minor = torch.cuda.get_device_capability(device)
+        bf16_support_map[device] = (major >= 8)
+
+    return bf16_support_map
+
+
+def zeropower_via_newtonschulz5(G: Tensor, steps: int, use_bf16: bool) -> Tensor:
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
     quintic iteration whose coefficients are selected to maximize the slope at zero. For the purpose
@@ -14,25 +32,27 @@ def zeropower_via_newtonschulz5(G: Tensor, steps: int) -> Tensor:
     where S' is diagonal with S_{ii}' ~ Uniform(0.5, 1.5), which turns out not to hurt model
     performance at all relative to UV^T, where USV^T = G is the SVD.
     """
-    # batched Muon implementation by @scottjmaddox, and put into practice in the record by @YouJiacheng
-    assert G.ndim == 3
+    assert G.ndim == 3  # batched Muon implementation by @scottjmaddox, and put into practice in the record by @YouJiacheng
     a, b, c = (3.4445, -4.7750, 2.0315)
-    X = G.float()
-    if G.size(-2) > G.size(-1):
-        X = X.mT
+
+    X = G.to(dtype=torch.bfloat16 if use_bf16 else torch.float32)
 
     # Ensure spectral norm is at most 1
     X = F.normalize(X, p=2.0, dim=(-2, -1), eps=1e-7)
 
     # Perform the NS iterations
-    for _ in range(steps):
-        A = X @ X.mT
-        B = torch.baddbmm(A, A, A, beta=b, alpha=c)
-        X = torch.baddbmm(X, B, X, beta=a, alpha=1)
+    if X.size(-2) < X.size(-1):
+        for _ in range(steps):
+            A = torch.bmm(X, X.mT)
+            A = torch.baddbmm(A, A, A, beta=b, alpha=c)
+            X = torch.baddbmm(X, A, X, beta=a, alpha=1)
+    else:
+        for _ in range(steps):
+            A = torch.bmm(X.mT, X)
+            A = torch.baddbmm(A, A, A, beta=b, alpha=c)
+            X = torch.baddbmm(X, X, A, beta=a, alpha=1)
 
-    if G.size(-2) > G.size(-1):
-        X = X.mT
-    return X.to(G)
+    return X
 
 
 class Muon(torch.optim.Optimizer):
@@ -61,6 +81,7 @@ class Muon(torch.optim.Optimizer):
     def __init__(self, params, lr=5e-4, weight_decay=0.1, momentum=0.95, nesterov=True, ns_steps=5):
         defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps)
         super().__init__(params, defaults)
+        self.bf16_support_map = get_bf16_support_map()
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -71,27 +92,29 @@ class Muon(torch.optim.Optimizer):
                 state = self.state[p]
                 if "momentum_buffer" not in state:
                     state["momentum_buffer"] = torch.zeros_like(g)
-                buf: Tensor = state["momentum_buffer"]
                 key = (p.shape, p.device, p.dtype)
                 if key not in shape_groups:
                     shape_groups[key] = {"params": [], "grads": [], "buffers": []}
                 shape_groups[key]["params"].append(p)
                 shape_groups[key]["grads"].append(g)
-                shape_groups[key]["buffers"].append(buf)
+                shape_groups[key]["buffers"].append(state["momentum_buffer"])
             for key in shape_groups:
                 group_data = shape_groups[key]
-                g = torch.stack(group_data["grads"])
-                buf = torch.stack(group_data["buffers"])
-                buf.lerp_(g, 1 - group["momentum"])
-                g = g.lerp_(buf, group["momentum"]) if group["nesterov"] else buf
+                p, g, buf, m = group_data["params"], group_data["grads"], group_data["buffers"], group["momentum"]
+                torch._foreach_lerp_(buf, g, 1 - m)
+                if group["nesterov"]:
+                    torch._foreach_lerp_(g, buf, m)
+                    g = torch.stack(g)
+                else:
+                    g = torch.stack(buf)
+                original_shape = g.shape
                 if g.ndim >= 4:  # for the case of conv filters
                     g = g.view(g.size(0), g.size(1), -1)
-                g = zeropower_via_newtonschulz5(g, steps=group["ns_steps"])
-                for i, p in enumerate(group_data["params"]):
-                    if group["weight_decay"] > 0:
-                        p.data.mul_(1 - group["lr"] * group["weight_decay"])
-                    p.data.add_(g[i].view_as(p), alpha=-group["lr"] * max(g[i].size()) ** 0.5)
-                    self.state[p]["momentum_buffer"] = buf[i].clone()
+                use_bf16 = self.bf16_support_map.get(g.device, False)
+                g = zeropower_via_newtonschulz5(g, steps=group["ns_steps"], use_bf16=use_bf16)
+                if group["weight_decay"] > 0:
+                    torch._foreach_mul_(p, 1 - group["lr"] * group["weight_decay"])
+                torch._foreach_add_(p, g.view(original_shape).unbind(0), alpha=-group["lr"] * max(g[0].size()) ** 0.5)
 
 
 # noinspection PyUnusedLocal
