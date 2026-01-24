@@ -18,7 +18,7 @@ class RegionalCosineSimilarityLoss(nn.Module):
         loss: Scalar tensor representing the average regional cosine similarity loss.
     """
 
-    def __init__(self, neighborhood_size: int = 3):
+    def __init__(self, neighborhood_size: int):
         super().__init__()
         self.neighborhood_size = neighborhood_size
 

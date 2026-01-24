@@ -48,7 +48,7 @@ training:
       max_db: 6
   loss:
     region_loss:
-      neighborhood_size: 3
+      neighborhood_size: 5
     boundary_loss:
       bidirectional: false
   dataloader:

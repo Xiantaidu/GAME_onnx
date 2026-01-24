@@ -116,7 +116,7 @@ class AugmentationConfig(ConfigBaseModel):
 
 
 class RegionLossConfig(ConfigBaseModel):
-    neighborhood_size: int = Field(3, ge=1)
+    neighborhood_size: int = Field(5, ge=1)
 
 
 class BoundaryLossConfig(ConfigBaseModel):
