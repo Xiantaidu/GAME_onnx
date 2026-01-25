@@ -6,15 +6,15 @@ import dask
 import numpy
 
 from lib import logging
-from .binarizer_base import BaseBinarizer, MetadataItem, DataSample, ACCEPTED_AUDIO_FORMATS
+from .binarizer_base import BaseBinarizer, MetadataItem, DataSample, find_waveform_file
 
 
 SYLLABLES_ITEM_ATTRIBUTES = [
     "language_id",  # int64
+    "spectrogram",  # float32 [T, C]
     "durations",  # int64 [N,]
     "regions",  # int64 [T,]
     "boundaries",  # bool [T,]
-    "spectrogram",  # float32 [T, C]
 ]
 
 
@@ -30,20 +30,12 @@ class SyllablesBinarizer(BaseBinarizer):
         with open(subset_dir / "index.csv", "r", encoding="utf8") as f:
             items = list(csv.DictReader(f))
         metadata_items = []
-        waveform_fn = None
         for item in items:
             item_name = item["name"]
             language = item.get("language")
-            for ext in ACCEPTED_AUDIO_FORMATS:
-                searched_wav_fn = subset_dir / "waveforms" / f"{item_name}{ext}"
-                if searched_wav_fn.exists():
-                    waveform_fn = searched_wav_fn
-                    break
+            waveform_fn = find_waveform_file(subset_dir, item_name)
             if waveform_fn is None:
-                logging.error(
-                    f"Waveform file missing in raw dataset \'{subset_dir.as_posix()}\':\n"
-                    f"item {item_name}, searched extensions: {', '.join(ACCEPTED_AUDIO_FORMATS)}."
-                )
+                continue
             syllable_durations = [
                 float(dur) for dur in item["syllables"].split()
             ]
@@ -63,14 +55,14 @@ class SyllablesBinarizer(BaseBinarizer):
         spectrogram, length = self.get_mel(waveform)
         syllable_dur_sec = numpy.array(item.syllable_durations, dtype=numpy.float32)
         syllable_dur_frames = self.sec_dur_to_frame_dur(syllable_dur_sec, length)
-        regions = self.length_regulator(syllable_dur_frames)
-        boundaries = self.regions_to_boundaries(regions)
+        frame2syllable = self.length_regulator(syllable_dur_frames)
+        boundaries = self.regions_to_boundaries(frame2syllable)
         data = {
             "language_id": language_id,
-            "durations": syllable_dur_frames,
-            "regions": regions,
-            "boundaries": boundaries,
             "spectrogram": spectrogram,
+            "durations": syllable_dur_frames,
+            "regions": frame2syllable,
+            "boundaries": boundaries,
         }
         data, length = dask.compute(data, length)
         return DataSample(

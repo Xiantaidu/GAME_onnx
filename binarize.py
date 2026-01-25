@@ -72,5 +72,15 @@ def _binarize_syllables_datasets_cli(config: pathlib.Path, override: list[str]):
     )
 
 
+@main.command(name="notes", help="Binarize raw notes datasets.")
+@shared_options
+def _binarize_notes_datasets_cli(config: pathlib.Path, override: list[str]):
+    config = _load_and_log_config(config, overrides=override)
+    from preprocessing.notes_binarizer import NotesBinarizer
+    binarize_datasets(
+        NotesBinarizer, config.binarizer
+    )
+
+
 if __name__ == "__main__":
     main()
