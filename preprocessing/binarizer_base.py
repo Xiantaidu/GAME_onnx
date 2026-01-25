@@ -204,6 +204,18 @@ class BaseBinarizer(abc.ABC):
         return boundaries
 
 
+def find_waveform_file(subset_dir: pathlib.Path, item_name: str) -> pathlib.Path:
+    for ext in ACCEPTED_AUDIO_FORMATS:
+        searched_wav_fn = subset_dir / "waveforms" / f"{item_name}{ext}"
+        if searched_wav_fn.exists():
+            return searched_wav_fn
+    logging.error(
+        f"Waveform file missing in raw dataset \'{subset_dir.as_posix()}\': "
+        f"item {item_name}, searched extensions: {', '.join(ACCEPTED_AUDIO_FORMATS)}."
+    )
+    return None
+
+
 def format_duration(seconds: float) -> str:
     """Formats a duration in seconds to a 'XhYmZs' string."""
     if seconds < 0:
