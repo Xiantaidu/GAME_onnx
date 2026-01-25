@@ -206,6 +206,9 @@ def _get_lightning_module_cls(key: str):
     if key == "syllables":
         from training.syllables_module import SyllablesLightningModule
         return SyllablesLightningModule
+    elif key == "syllables_s2":
+        from training.syllables_module_s2 import SyllablesLightningModuleS2
+        return SyllablesLightningModuleS2
     else:
         raise ValueError(f"Invalid lightning module key: {key}")
 

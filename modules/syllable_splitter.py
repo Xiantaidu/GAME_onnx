@@ -24,3 +24,5 @@ class SyllableSplitter(nn.Module):
         x = self.language_embedding(language.unsqueeze(-1)) + self.spectrogram_projection(spectrogram)
         features, boundaries = self.backbone(x)
         return features, boundaries
+
+
