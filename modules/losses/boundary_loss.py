@@ -76,13 +76,16 @@ class ApproachingMomentumLoss(nn.Module):
         return momentum
 
     def forward(self, velocities: Tensor, boundaries: Tensor, mask=None):
-        gt_distance = distance_transform(boundaries)
-        momentum = self.get_momentum(gt_distance)
+        if mask is not None:
+            mask = mask.float()
+            velocities = velocities * mask
         pred_distance = velocities.cumsum(dim=1)
-        scale = gt_distance.max(dim=1, keepdim=True).values.clamp(min=1, max=self.cutoff_radius)
+        gt_distance = distance_transform(boundaries)
+        scale = gt_distance.amax(dim=1, keepdim=True).clamp(min=1, max=self.cutoff_radius)
+        momentum = self.get_momentum(gt_distance)
         loss = self.criterion(pred_distance / scale, gt_distance / scale) * momentum
         if mask is not None:
-            loss = (loss * mask.float()).sum() / (mask.float().sum() + 1e-6)
+            loss = (loss * mask).sum() / (mask.sum() + 1e-6)
         else:
             loss = loss.mean()
         return loss
