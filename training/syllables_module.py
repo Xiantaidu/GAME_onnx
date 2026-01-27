@@ -107,9 +107,9 @@ class SyllablesLightningModule(BaseLightningModule):
 
             distance_gt = distance_transform(boundaries)
             distance_pred = velocities.cumsum(dim=0)
-            bias = distance_pred.min().clamp(min=0)
-            scale = (distance_pred.max() - bias).clamp(min=1e-3)
-            threshold_denorm = (BOUNDARY_DECODING_THRESHOLD * scale + bias).cpu().numpy().item()
+            d_min = distance_pred.min()
+            d_max = distance_pred.max()
+            threshold_denorm = (BOUNDARY_DECODING_THRESHOLD * (d_max - d_min + 1e-8) + d_min).cpu().numpy().item()
 
             self.plot_regions(
                 data_idx, similarities, durations,

@@ -84,7 +84,7 @@ def distance_transform(boundaries: Tensor) -> Tensor:
         boundaries.shape[-1], dtype=torch.float32, device=boundaries.device,
     ).view([1] * (boundaries.ndim - 1) + [-1])  # [..., T]
     masked_indices = torch.where(boundaries, indices, torch.full_like(indices, fill_value=float("inf")))
-    distance = torch.abs(indices.unsqueeze(-1) - masked_indices.unsqueeze(-2)).min(dim=-1).values
+    distance = torch.abs(indices.unsqueeze(-1) - masked_indices.unsqueeze(-2)).amin(dim=-1)
     distance = distance[..., 1:-1]
     return distance
 
@@ -128,9 +128,8 @@ def decode_boundaries_from_velocities(velocities: Tensor, threshold: float = 0.2
     :return: [..., T], 1 = boundary, 0 = non-boundary
     """
     distances = velocities.cumsum(dim=-1)
-    bias = distances.min(dim=-1, keepdim=True).values.clamp(min=0)
-    distances = distances - bias
-    scale = distances.max(dim=-1, keepdim=True).values.clamp(min=1e-3)
-    distances = distances / scale
+    d_min = distances.amin(dim=-1, keepdim=True)
+    d_max = distances.amax(dim=-1, keepdim=True)
+    distances = (distances - d_min) / (d_max - d_min + 1e-8)
     boundaries = find_local_minima(distances, threshold=threshold, radius=radius)  # [..., T]
     return boundaries
