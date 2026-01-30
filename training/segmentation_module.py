@@ -3,7 +3,11 @@ import torch.nn.functional as F
 from lightning.pytorch.loggers import TensorBoardLogger
 from torch import nn
 
-from lib.plot import similarity_to_figure, distance_boundary_to_figure, boundary_to_figure
+from lib.plot import (
+    similarity_to_figure,
+    distance_boundary_to_figure,
+    boundary_to_figure,
+)
 from modules.decoding import decode_boundaries_from_velocities
 from modules.losses import (
     ApproachingMomentumLoss,
