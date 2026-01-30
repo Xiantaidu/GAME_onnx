@@ -69,15 +69,18 @@ def decode_boundaries_from_velocities(
     :param radius: int, radius for local minima search
     :return: [..., T], 1 = boundary, 0 = non-boundary
     """
-    if mask is None:
-        mask = torch.ones_like(velocities, dtype=torch.bool)
     distances = velocities.cumsum(dim=-1)
-    distances_upper_masked = torch.where(mask, distances, float("+inf"))
-    distances_lower_masked = torch.where(mask, distances, float("-inf"))
+    if mask is not None:
+        distances_upper_masked = torch.where(mask, distances, float("+inf"))
+        distances_lower_masked = torch.where(mask, distances, float("-inf"))
+    else:
+        distances_upper_masked = distances
+        distances_lower_masked = distances
     d_min = distances_upper_masked.amin(dim=-1, keepdim=True)
     d_max = distances_lower_masked.amax(dim=-1, keepdim=True)
     distances = (distances - d_min) / (d_max - d_min + 1e-8)
-    distances = torch.where(mask, distances, float("-inf"))
+    if mask is not None:
+        distances = torch.where(mask, distances, float("-inf"))
     if barriers is not None:
         distances = torch.masked_fill(distances, barriers, float("-inf"))
     boundaries = find_local_minima(distances, threshold=threshold, radius=radius)  # [..., T]
