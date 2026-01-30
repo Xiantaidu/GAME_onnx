@@ -80,6 +80,7 @@ class ApproachingMomentumLoss(nn.Module):
 
     def forward(self, velocities: Tensor, boundaries: Tensor, mask=None):
         if mask is not None:
+            boundaries = boundaries | ~mask
             mask = mask.float()
             velocities = velocities * mask
         gt_distance = distance_transform(boundaries, max_distance=self.radius)
