@@ -84,8 +84,8 @@ training:
   validation:
     max_plots: 10
   finetuning:
-    pretraining_enabled: true
-    pretraining_from: experiments/test-segmentation/model-latest-steps=0008000-epochs=0014.ckpt
+    pretraining_enabled: false
+    pretraining_from: null
     pretraining_include_params: ["model.*"]
     pretraining_exclude_params: []
     freezing_enabled: false
