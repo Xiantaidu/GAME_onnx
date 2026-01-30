@@ -3,6 +3,22 @@ from torch import nn, Tensor
 
 
 class GaussianBlurredBinsLoss(nn.Module):
+    """
+    This loss map ground truth scores to a set of Gaussian-blurred bins, and computes the BCEWithLogitsLoss
+    between the predicted logits and the blurred targets.
+    Arguments:
+        min_val: float, minimum value of the score range.
+        max_val: float, maximum value of the score range.
+        num_bins: int, number of bins (N) to quantize the score range.
+        deviation: float, standard deviation of the Gaussian blur in the original score scale.
+    Inputs:
+        - logits: Tensor of shape [..., T, N], predicted logits for each bin.
+        - scores: Tensor of shape [..., T], target scores.
+        - presence: Tensor of shape [..., T], target presence indicators, 0 means no score.
+        - mask: Optional Tensor of shape [..., T], mask to apply on the loss.
+    Outputs:
+        Scalar tensor representing the Gaussian blurred bins loss.
+    """
 
     def __init__(self, min_val: float, max_val: float, num_bins: int, deviation: float):
         super().__init__()
@@ -14,26 +30,16 @@ class GaussianBlurredBinsLoss(nn.Module):
         self.register_buffer("centers", centers, persistent=False)
         self.criterion = nn.BCEWithLogitsLoss(reduction="none")
 
-    def forward(self, logits: Tensor, scores: Tensor, presence: Tensor, weights: Tensor = None, mask=None) -> Tensor:
-        """
-        :param logits: [..., T, C] predicted logits
-        :param scores: [..., T] target scores
-        :param presence: [..., T] target presence, 0 means no score
-        :param weights: [..., T] optional weights on each position
-        :param mask: [..., T] optional mask
-        :return: loss value
-        """
+    def forward(self, logits: Tensor, scores: Tensor, presence: Tensor, mask=None) -> Tensor:
         B = (1,) * (logits.ndim - 2)
         if mask is not None:
             mask = mask.unsqueeze(-1).float().expand_as(logits)
-        centers = self.centers.reshape(*B, 1, -1)  # [..., 1, C]
-        diffs = scores.unsqueeze(-1) - centers  # [..., T, C]
-        gaussians = torch.exp(-0.5 * (diffs / self.std) ** 2)  # [..., T, C]
+        centers = self.centers.reshape(*B, 1, -1)  # [..., 1, N]
+        diffs = scores.unsqueeze(-1) - centers  # [..., T, N]
+        gaussians = torch.exp(-0.5 * (diffs / self.std) ** 2)  # [..., T, N]
         gaussians = gaussians / (gaussians.sum(dim=-1, keepdim=True) + 1e-6)  # normalize
         targets = gaussians * presence.unsqueeze(-1)  # zero out where no presence
         loss = self.criterion(logits, targets)
-        if weights is not None:
-            loss = loss * weights.unsqueeze(-1)
         if mask is not None:
             loss = (loss * mask).sum() / (mask.sum() + 1e-6)
         else:
