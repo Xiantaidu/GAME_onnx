@@ -48,13 +48,13 @@ class SingleRoPosEmb(nn.Module):
         self.theta = theta
         self.use_cache = use_cache
         # inv_freq是固定的，可以预计算
-        self.register_buffer('inv_freq', compute_inv_freq(dim, theta))
+        self.register_buffer('inv_freq', compute_inv_freq(dim, theta),persistent=False)
         # 缓存模式下预计算pe
         if use_cache:
             pe_cos, pe_sin = compute_freqs_cis_dynamic(
                 torch.zeros(1, max_len, dim), self.inv_freq)
-            self.register_buffer('pe_cos', pe_cos[None, :, :])
-            self.register_buffer('pe_sin', pe_sin[None, :, :])
+            self.register_buffer('pe_cos', pe_cos[None, :, :],persistent=False)
+            self.register_buffer('pe_sin', pe_sin[None, :, :],persistent=False)
 
     def extend_pe(self, x):
         """Reset the positional encodings (only for use_cache=True mode)."""
