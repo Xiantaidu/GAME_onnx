@@ -20,66 +20,6 @@ def compute_freqs_cis_dynamic(x: torch.Tensor, inv_freq: torch.Tensor):
     return torch.cos(freqs), torch.sin(freqs)
 
 
-# 旋转位置编码计算 (ONNX兼容版本)
-def apply_rotary_emb(
-        xq: torch.Tensor,
-        xk: torch.Tensor,
-        freqs_cos: torch.Tensor,
-        freqs_sin: torch.Tensor,
-) :
-    """ONNX兼容：手动实现复数乘法 (a+bi)*(c+di) = (ac-bd) + (ad+bc)i"""
-    xq_ = xq.float().reshape(*xq.shape[:-1], -1, 2)
-    xk_ = xk.float().reshape(*xk.shape[:-1], -1, 2)
-
-    # 分离实部和虚部
-    xq_r, xq_i = xq_[..., 0], xq_[..., 1]
-    xk_r, xk_i = xk_[..., 0], xk_[..., 1]
-
-    # 复数乘法: (xq_r + xq_i*j) * (cos + sin*j) = (xq_r*cos - xq_i*sin) + (xq_r*sin + xq_i*cos)*j
-    xq_out_r = xq_r * freqs_cos - xq_i * freqs_sin
-    xq_out_i = xq_r * freqs_sin + xq_i * freqs_cos
-    xk_out_r = xk_r * freqs_cos - xk_i * freqs_sin
-    xk_out_i = xk_r * freqs_sin + xk_i * freqs_cos
-
-    # 合并实部和虚部
-    xq_out = torch.stack([xq_out_r, xq_out_i], dim=-1).flatten(-2)
-    xk_out = torch.stack([xk_out_r, xk_out_i], dim=-1).flatten(-2)
-    return xq_out.type_as(xq), xk_out.type_as(xk)
-
-class RoPosEmb(nn.Module):
-    def __init__(self, dim, max_len=5000, theta=10000.0, use_cache=True):
-        super().__init__()
-        self.dim = dim
-        self.theta = theta
-        self.use_cache = use_cache
-        # inv_freq是固定的，可以预计算
-        self.register_buffer('inv_freq', compute_inv_freq(dim, theta))
-        # 缓存模式下预计算pe
-        if use_cache:
-            pe_cos, pe_sin = compute_freqs_cis_dynamic(
-                torch.zeros(1, max_len, dim), self.inv_freq)
-            self.register_buffer('pe_cos', pe_cos[None, :, :])
-            self.register_buffer('pe_sin', pe_sin[None, :, :])
-
-    def extend_pe(self, x):
-        """Reset the positional encodings (only for use_cache=True mode)."""
-        if self.pe_cos.size(1) >= x.size(1):
-            return
-        pe_cos, pe_sin = compute_freqs_cis_dynamic(x, self.inv_freq)
-        self.pe_cos = pe_cos[None, :, :].to(device=x.device)
-        self.pe_sin = pe_sin[None, :, :].to(device=x.device)
-
-    def forward(self, q, k):
-        if self.use_cache:
-            self.extend_pe(q)
-            pe_cos = self.pe_cos[:, :q.size(1)]
-            pe_sin = self.pe_sin[:, :q.size(1)]
-        else:
-            # ONNX模式：完全动态计算
-            pe_cos, pe_sin = compute_freqs_cis_dynamic(q, self.inv_freq)
-        return apply_rotary_emb(q, k, pe_cos, pe_sin)
-
-
 
 def single_apply_rotary_emb(
         x: torch.Tensor,
@@ -245,15 +185,15 @@ if __name__ == '__main__':
     except ImportError:
         print("(skip ONNX Runtime test, onnxruntime not installed)")
 
-    print("\n" + "=" * 50)
-    print("测试3: RoPosEmb双输入版本")
-    print("=" * 50)
-    q = torch.randn(1, seq_len, dim)
-    k = torch.randn(1, seq_len, dim)
-    rope = RoPosEmb(dim, use_cache=True)
-    q_out, k_out = rope(q, k)
-    print(f"q_out.shape: {q_out.shape}, k_out.shape: {k_out.shape}")
-    print("[PASS] RoPosEmb test passed!")
-
-    print("\n=== All tests passed! ===")
+    # print("\n" + "=" * 50)
+    # print("测试3: RoPosEmb双输入版本")
+    # print("=" * 50)
+    # q = torch.randn(1, seq_len, dim)
+    # k = torch.randn(1, seq_len, dim)
+    # rope = RoPosEmb(dim, use_cache=True)
+    # q_out, k_out = rope(q, k)
+    # print(f"q_out.shape: {q_out.shape}, k_out.shape: {k_out.shape}")
+    # print("[PASS] RoPosEmb test passed!")
+    #
+    # print("\n=== All tests passed! ===")
 
