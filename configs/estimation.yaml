@@ -8,11 +8,7 @@ binarizer:
 model:
   embedding_dim: 256
   region_cycle_len: 3
-  midi_min: 0
-  midi_max: 127
-  midi_num_bins: 256
   use_glu: true
-
   adaptor:
     cls: "modules.backbones.EBF.EBFBackbone"
     kwargs:
@@ -25,7 +21,7 @@ model:
       head_dim: 64
       c_kernel_size: 31
       m_kernel_size: 31
-      ffn_type: 'glu' # 'glu', 'ffn', 'cgmlp' #对了这里换成cgmlp看看效果
+      ffn_type: 'glu' # 'glu', 'ffn', 'cgmlp'
       ffn_latent_drop: 0.0
       ffn_out_drop: 0.1
       use_ls: true
@@ -57,4 +53,6 @@ training:
       neighborhood_size: 5
       exponential_decay: true
     note_loss:
-      deviation: 1.0
+      midi_min: 0
+      midi_max: 128
+      dial_periods: [48, 24, 12, 4, 1]

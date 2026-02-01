@@ -54,19 +54,15 @@ class EstimationModel(nn.Module):
         self.downsample = LocalDownsample()
         self.estimator = build_object_from_class_name(
             config.estimator.cls, nn.Module,
-            config.embedding_dim, config.midi_num_bins, False,
+            config.embedding_dim, config.estimator_out_channels, False,
             **config.estimator.kwargs
         )
 
-    def forward(self, spectrogram, regions, max_n: int, t_mask=None, n_mask=None, sigmoid=True):
+    def forward(self, spectrogram, regions, max_n: int, t_mask=None, n_mask=None):
         x = self.spectrogram_projection(spectrogram) + self.region_embedding(regions)
         x, latent = self.adaptor(x, mask=t_mask)
         if self.use_glu:
             x = self.glu(x)
         x_down = self.downsample(x, regions, max_n=max_n)
-        logits = self.estimator(x_down, mask=n_mask)
-        if sigmoid:
-            estimations = logits.sigmoid()
-            return estimations, latent
-        else:
-            return logits, latent
+        estimations = self.estimator(x_down, mask=n_mask)
+        return estimations, latent

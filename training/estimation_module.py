@@ -7,16 +7,16 @@ from lib.plot import (
     note_to_figure,
     probs_to_figure,
 )
-from modules.decoding import decode_gaussian_blurred_probs
+from modules.decoding import decode_cascaded_dial_pointers
 from modules.losses import (
     RegionalCosineSimilarityLoss,
-    GaussianBlurredBinsLoss,
+    CascadedDialCaliperLoss,
 )
 from modules.metrics.pitch import (
+    NotePresenceMetricCollection,
     RawPitchRMSE,
     RawPitchAccuracy,
     OverallAccuracy,
-    NotePresenceMetricCollection,
 )
 from modules.midi_extraction import EstimationModel
 from training.data import BaseDataset
@@ -24,6 +24,7 @@ from training.pl_module_base import BaseLightningModule
 
 NOTE_DECODING_THRESHOLD = 0.2
 NOTE_ACCURACY_TOLERANCE = 0.5
+CALIPER_PERIODS = [48.0, 24.0, 12.0, 4.0, 1.0]
 
 
 class EstimationDataset(BaseDataset):
@@ -50,12 +51,12 @@ class EstimationLightningModule(BaseLightningModule):
             neighborhood_size=self.training_config.loss.region_loss.neighborhood_size,
             exponential_decay=self.training_config.loss.region_loss.exponential_decay,
         ))
-        self.register_loss("note_loss", GaussianBlurredBinsLoss(
-            min_val=self.model_config.midi_min,
-            max_val=self.model_config.midi_max,
-            num_bins=self.model_config.midi_num_bins,
-            deviation=self.training_config.loss.note_loss.deviation,
+        self.register_loss("note_presence_loss", nn.BCEWithLogitsLoss(reduction="mean"))
+        self.register_loss("note_beam_loss", nn.MSELoss(reduction="mean"))
+        self.register_loss("note_dial_loss", CascadedDialCaliperLoss(
+            periods=self.training_config.loss.note_loss.dial_periods,
         ))
+        self.register_metric("presence_metric_collection", NotePresenceMetricCollection())
         self.register_metric("raw_pitch_rmse", RawPitchRMSE())
         self.register_metric("raw_pitch_accuracy", RawPitchAccuracy(
             tolerance=NOTE_ACCURACY_TOLERANCE,
@@ -63,7 +64,6 @@ class EstimationLightningModule(BaseLightningModule):
         self.register_metric("overall_accuracy", OverallAccuracy(
             tolerance=NOTE_ACCURACY_TOLERANCE,
         ))
-        self.register_metric("presence_metric_collection", NotePresenceMetricCollection())
 
     def forward_model(self, sample: dict[str, torch.Tensor], infer: bool) -> dict[str, torch.Tensor]:
         spectrogram = sample["spectrogram"]
@@ -75,19 +75,29 @@ class EstimationLightningModule(BaseLightningModule):
         scores = sample["scores"]
         presence = sample["presence"]
 
+        min_val = self.training_config.loss.note_loss.midi_min
+        max_val = self.training_config.loss.note_loss.midi_max
+
+        estimations, latent = self.model(
+            spectrogram, regions=regions, max_n=max_n,
+            t_mask=t_mask, n_mask=n_mask,
+        )  # [B, N, C_out]
+        presence_logits = estimations[:, :, 0]  # [B, N]
+        beam_norm_pred = estimations[:, :, 1]  # [B, N]
+        dials_pred = estimations[:, :, 2:].reshape(-1, max_n, len(CALIPER_PERIODS), 2)  # [B, N, num_periods, 2]
+
         if infer:
-            probs, _ = self.model(
-                spectrogram, regions=regions, max_n=max_n,
-                t_mask=t_mask, n_mask=n_mask, sigmoid=True,
-            )  # [B, N, C_out]
-            scores_pred, presence_pred = decode_gaussian_blurred_probs(
-                probs=probs,
-                min_val=self.model_config.midi_min,
-                max_val=self.model_config.midi_max,
-                deviation=3 * self.training_config.loss.note_loss.deviation,
-                threshold=NOTE_DECODING_THRESHOLD,
+            presence_pred = presence_logits.sigmoid() >= NOTE_DECODING_THRESHOLD
+            beam_pred = beam_norm_pred * (max_val - min_val) + min_val
+            scores_pred = decode_cascaded_dial_pointers(
+                beam=beam_pred,
+                dials=dials_pred,
+                periods=self.training_config.loss.note_loss.dial_periods,
             )
             weights = durations.clamp(min=0).float()
+            self.metrics["presence_metric_collection"].update(
+                presence_pred, presence, weights=weights, mask=n_mask,
+            )
             self.metrics["raw_pitch_rmse"].update(
                 pred_scores=scores_pred,
                 target_scores=scores, target_presence=presence,
@@ -103,24 +113,34 @@ class EstimationLightningModule(BaseLightningModule):
                 target_scores=scores, target_presence=presence,
                 weights=weights, mask=n_mask,
             )
-            self.metrics["presence_metric_collection"].update(
-                presence_pred, presence, weights=weights, mask=n_mask,
-            )
             return {
-                "probs": probs,
                 "scores": scores_pred,
                 "presence": presence_pred,
             }
         else:
-            logits, latent = self.model(
-                spectrogram, regions=regions, max_n=max_n,
-                t_mask=t_mask, n_mask=n_mask, sigmoid=False,
-            )
             region_adapt_loss = self.losses["region_adapt_loss"](latent, regions)
-            note_loss = self.losses["note_loss"](logits, scores, presence, mask=n_mask)
+            if not n_mask.any():
+                note_presence_loss = torch.tensor(0.0, device=presence_logits.device)
+            else:
+                note_presence_loss = self.losses["note_presence_loss"](
+                    presence_logits[n_mask], presence[n_mask].float()
+                )
+            voiced = presence & n_mask
+            if not voiced.any():
+                note_beam_loss = torch.tensor(0.0, device=beam_norm_pred.device)
+                note_dial_loss = torch.tensor(0.0, device=dials_pred.device)
+            else:
+                note_beam_loss = self.losses["note_beam_loss"](
+                    beam_norm_pred[voiced], (scores[voiced] - min_val) / (max_val - min_val)
+                )
+                note_dial_loss = self.losses["note_dial_loss"](
+                    dials=dials_pred[voiced], targets=scores[voiced]
+                )
             return {
                 "region_adapt_loss": region_adapt_loss,
-                "note_loss": note_loss,
+                "note_presence_loss": note_presence_loss,
+                "note_beam_loss": note_beam_loss,
+                "note_dial_loss": note_dial_loss,
             }
 
     def plot_validation_results(self, sample: dict[str, torch.Tensor], outputs: dict[str, torch.Tensor]) -> None:
@@ -128,22 +148,12 @@ class EstimationLightningModule(BaseLightningModule):
             data_idx = sample['indices'][i].item()
             if data_idx >= self.training_config.validation.max_plots:
                 continue
-            T = self.valid_dataset.info["lengths"][data_idx]
             N = self.valid_dataset.info["durations"][data_idx]
-            regions = sample["regions"][i, :T]  # [T]
             durations = sample["durations"][i, :N]  # [N]
             scores = sample["scores"][i, :N]  # [N]
             presence = sample["presence"][i, :N]  # [N]
-            probs = self.losses["note_loss"].get_gaussian_blurred_bins(scores=scores, presence=presence)
-            probs_pred = outputs["probs"][i, :N, :]  # [N, C_out]
             scores_pred = outputs["scores"][i, :N]  # [N]
             presence_pred = outputs["presence"][i, :N]  # [N]
-            self.plot_probs(
-                idx=data_idx,
-                frame2note=regions,
-                probs_gt=probs, probs_pred=probs_pred,
-                title=self.valid_dataset.info["item_paths"][data_idx]
-            )
             self.plot_notes(
                 idx=data_idx,
                 durations=durations,

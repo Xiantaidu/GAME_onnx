@@ -5,6 +5,56 @@ import torchmetrics
 from torch import Tensor
 
 
+class NotePresenceMetricCollection(torchmetrics.Metric):
+    """
+    This metric collection computes a set of binary classification metrics for pitch presence prediction.
+    Arguments:
+        None
+    Inputs:
+        - pred_presence: Boolean tensor of shape [..., T], predicted presence indicators, 0 means no score or unvoiced.
+        - target_presence: Boolean tensor of shape [..., T], target presence indicators, 0 means no score or unvoiced.
+        - weights: Optional Tensor of shape [..., T], weights to apply on each frame.
+        - mask: Optional Tensor of shape [..., T], mask to apply on the frames.
+    Outputs:
+        - presence_precision: Scalar tensor representing the precision, i.e. TP / (TP + FP).
+        - presence_recall: Scalar tensor representing the recall, i.e. TP / (TP + FN).
+        - presence_tnr: Scalar tensor representing the true negative rate, i.e. TN / (TN + FP).
+        - presence_f1_score: Scalar tensor representing the F1 score.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.add_state("tp", default=torch.tensor(0.0, dtype=torch.float32), dist_reduce_fx="sum")
+        self.add_state("tn", default=torch.tensor(0.0, dtype=torch.float32), dist_reduce_fx="sum")
+        self.add_state("fp", default=torch.tensor(0.0, dtype=torch.float32), dist_reduce_fx="sum")
+        self.add_state("fn", default=torch.tensor(0.0, dtype=torch.float32), dist_reduce_fx="sum")
+
+    def update(
+            self, pred_presence: Tensor, target_presence: Tensor,
+            weights: Tensor = None, mask: Tensor = None
+    ) -> None:
+        if weights is None:
+            weights = torch.ones_like(target_presence).float()
+        if mask is not None:
+            weights = weights * mask.float()
+        self.tp += (pred_presence & target_presence).float().mul(weights).sum()
+        self.tn += (~pred_presence & ~target_presence).float().mul(weights).sum()
+        self.fp += (pred_presence & ~target_presence).float().mul(weights).sum()
+        self.fn += (~pred_presence & target_presence).float().mul(weights).sum()
+
+    def compute(self) -> Any:
+        precision = self.tp / (self.tp + self.fp + 1e-6)
+        recall = self.tp / (self.tp + self.fn + 1e-6)
+        tnr = self.tn / (self.tn + self.fp + 1e-6)
+        f1_score = 2 * precision * recall / (precision + recall + 1e-6)
+        return {
+            "presence_precision": precision,
+            "presence_recall": recall,
+            "presence_tnr": tnr,
+            "presence_f1_score": f1_score,
+        }
+
+
 class RawPitchRMSE(torchmetrics.Metric):
     """
     This metric computes Root Mean Squared Error (RMSE) for pitch scores, considering only the voiced frames
@@ -124,53 +174,3 @@ class OverallAccuracy(torchmetrics.Metric):
 
     def compute(self) -> Any:
         return self.correct / (self.total + 1e-6)
-
-
-class NotePresenceMetricCollection(torchmetrics.Metric):
-    """
-    This metric collection computes a set of binary classification metrics for pitch presence prediction.
-    Arguments:
-        None
-    Inputs:
-        - pred_presence: Boolean tensor of shape [..., T], predicted presence indicators, 0 means no score or unvoiced.
-        - target_presence: Boolean tensor of shape [..., T], target presence indicators, 0 means no score or unvoiced.
-        - weights: Optional Tensor of shape [..., T], weights to apply on each frame.
-        - mask: Optional Tensor of shape [..., T], mask to apply on the frames.
-    Outputs:
-        - presence_precision: Scalar tensor representing the precision, i.e. TP / (TP + FP).
-        - presence_recall: Scalar tensor representing the recall, i.e. TP / (TP + FN).
-        - presence_tnr: Scalar tensor representing the true negative rate, i.e. TN / (TN + FP).
-        - presence_f1_score: Scalar tensor representing the F1 score.
-    """
-
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.add_state("tp", default=torch.tensor(0.0, dtype=torch.float32), dist_reduce_fx="sum")
-        self.add_state("tn", default=torch.tensor(0.0, dtype=torch.float32), dist_reduce_fx="sum")
-        self.add_state("fp", default=torch.tensor(0.0, dtype=torch.float32), dist_reduce_fx="sum")
-        self.add_state("fn", default=torch.tensor(0.0, dtype=torch.float32), dist_reduce_fx="sum")
-
-    def update(
-            self, pred_presence: Tensor, target_presence: Tensor,
-            weights: Tensor = None, mask: Tensor = None
-    ) -> None:
-        if weights is None:
-            weights = torch.ones_like(target_presence).float()
-        if mask is not None:
-            weights = weights * mask.float()
-        self.tp += (pred_presence & target_presence).float().mul(weights).sum()
-        self.tn += (~pred_presence & ~target_presence).float().mul(weights).sum()
-        self.fp += (pred_presence & ~target_presence).float().mul(weights).sum()
-        self.fn += (~pred_presence & target_presence).float().mul(weights).sum()
-
-    def compute(self) -> Any:
-        precision = self.tp / (self.tp + self.fp + 1e-6)
-        recall = self.tp / (self.tp + self.fn + 1e-6)
-        tnr = self.tn / (self.tn + self.fp + 1e-6)
-        f1_score = 2 * precision * recall / (precision + recall + 1e-6)
-        return {
-            "presence_precision": precision,
-            "presence_recall": recall,
-            "presence_tnr": tnr,
-            "presence_f1_score": f1_score,
-        }

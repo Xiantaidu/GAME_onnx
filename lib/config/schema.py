@@ -6,7 +6,7 @@ from pydantic import Field, field_validator
 from .core import ConfigBaseModel
 from .ops import (
     ConfigOperationBase, ConfigOperationContext,
-    ref, this, ctx, if_, exists, coalesce
+    ref, this, ctx, if_, exists, coalesce, len_, min_
 )
 
 
@@ -89,18 +89,9 @@ class ModelConfig(ConfigBaseModel):
         "dynamic_expr": ref("binarizer.features.spectrogram.num_bins")
     })
     embedding_dim: int = Field(128, gt=0)
-    midi_min: float = Field(0.0, json_schema_extra={
-        "scope": ConfigurationScope.ESTIMATION
-    })
-    midi_max: float = Field(127.0, json_schema_extra={
+    estimator_out_channels: int = Field(None, json_schema_extra={
         "scope": ConfigurationScope.ESTIMATION,
-        "dynamic_check": DynamicCheck(
-            expr=this() > ref("model.midi_min"),
-            message="midi_max must be greater than midi_min."
-        )
-    })
-    midi_num_bins: int = Field(256, ge=2, json_schema_extra={
-        "scope": ConfigurationScope.ESTIMATION
+        "dynamic_expr": (len_(ref("training.loss.note_loss.dial_periods")) * 2 + 2)
     })
     use_glu: bool = Field(False, json_schema_extra={
         "scope": ConfigurationScope.ESTIMATION
@@ -165,7 +156,14 @@ class BoundaryLossConfig(ConfigBaseModel):
 
 
 class NoteLossConfig(ConfigBaseModel):
-    deviation: float = Field(1.0, gt=0.0)
+    midi_min: float = Field(0.0)
+    midi_max: float = Field(127.0)
+    dial_periods: list[float] = Field(..., min_length=1, json_schema_extra={
+        "dynamic_check": DynamicCheck(
+            expr=min_(this()) > 0,
+            message="All dial periods must be greater than 0."
+        )
+    })
 
 
 class LossConfig(ConfigBaseModel):
@@ -330,7 +328,20 @@ class InferenceConfig(ConfigBaseModel):
         "dynamic_expr": ref("binarizer.features")
     })
     use_language_embedding: bool = Field(None, json_schema_extra={
+        "scope": ConfigurationScope.SEGMENTATION,
         "dynamic_expr": ref("model.use_language_embedding")
+    })
+    midi_min: float = Field(None, json_schema_extra={
+        "scope": ConfigurationScope.ESTIMATION,
+        "dynamic_expr": ref("loss.note_loss.midi_min")
+    })
+    midi_max: float = Field(None, json_schema_extra={
+        "scope": ConfigurationScope.ESTIMATION,
+        "dynamic_expr": ref("loss.note_loss.midi_max")
+    })
+    note_dial_periods: list[float] = Field(None, json_schema_extra={
+        "scope": ConfigurationScope.ESTIMATION,
+        "dynamic_expr": ref("loss.note_loss.dial_periods")
     })
 
 

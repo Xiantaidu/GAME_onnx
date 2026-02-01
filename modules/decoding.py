@@ -1,8 +1,8 @@
 import math
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor
-from torch.nn import functional as F
 
 
 def find_local_minima(x: Tensor, threshold: float, radius: int = 2):
@@ -30,7 +30,7 @@ def decode_boundaries_from_velocities(
     """
     Decode boundary indicators from predicted velocities. Steps:
         1. Accumulate velocities to get distances.
-        2. Normalize distances, remove positive bias and scale maximum to 1.
+        2. Apply min-max normalization to distances.
         3. Find local minima in distances that are below the threshold.
     :param velocities: [..., T]
     :param barriers: [..., T],optional preset boundaries or local minima points
@@ -70,32 +70,51 @@ def decode_quantized_boundaries(boundaries: Tensor):
     return F.pad(boundaries_diff, (1, 0), mode="constant", value=1)
 
 
+def decode_cascaded_dial_pointers(
+        beam: Tensor, dials: Tensor, periods: list[float]
+):
+    """
+    Decode cascaded dial pointers one-by-one to refine the beam values.
+    For each iteration, beam := [(beam - dial) / period] * period + dial
+    :param beam: [...], initial beam values
+    :param dials: [..., N, 2], cascaded dial pointers in Cartesian coordinates
+    :param periods: list of float, periods for each dial
+    :return: [...], refined beam values
+    """
+    angles = torch.atan2(dials[..., 1], dials[..., 0])  # [..., N]
+    for period, angle in zip(periods, angles.unbind(dim=-1)):
+        dial = (angle / (2 * torch.pi)) * period  # [...]
+        k = torch.round((beam - dial) / period)  # [...]
+        beam = k * period + dial  # [...]
+    return beam
+
+
 def decode_gaussian_blurred_probs(
         probs: Tensor,
         min_val: float, max_val: float, deviation: float,
-        threshold: float
+        threshold: float = 0.1
 ):
     """
     Decode gaussian-blurred probabilities to continuous values and presence flags.
-    :param probs: [..., T, N]
+    :param probs: [..., N]
     :param min_val: value of the lowest bin
     :param max_val: value of the highest bin
     :param deviation: deviation of the gaussian blur in the original value scale
     :param threshold: presence threshold
-    :return: values [..., T], presence [..., T]
+    :return: values [...], presence [...]
     """
-    B = (1,) * (probs.ndim - 2)
+    B = (1,) * (probs.ndim - 1)
     N = probs.shape[-1]
     width = math.ceil(deviation / (max_val - min_val) * (N - 1))
-    idx = torch.arange(N, dtype=torch.long, device=probs.device).reshape(*B, 1, -1)  # [..., 1, N]
-    center_values = torch.linspace(min_val, max_val, steps=N, device=probs.device).reshape(*B, 1, -1)  # [1, 1, N]
-    centers = torch.argmax(probs, dim=-1, keepdim=True)  # [..., T, 1]
-    start = torch.clip(centers - width, min=0)  # [..., T, 1]
-    end = torch.clip(centers + width + 1, max=N)  # [..., T, 1]
-    idx_masks = (idx >= start) & (idx < end)  # [..., T, N]
-    weights = probs * idx_masks  # [..., T, N]
-    product_sum = torch.sum(weights * center_values, dim=2)  # [..., T]
-    weight_sum = torch.sum(weights, dim=2)  # [..., T]
+    idx = torch.arange(N, dtype=torch.long, device=probs.device).reshape(*B, -1)  # [..., N]
+    center_values = torch.linspace(min_val, max_val, steps=N, device=probs.device).reshape(*B, -1)  # [..., N]
+    centers = torch.argmax(probs, dim=-1, keepdim=True)  # [..., 1]
+    start = torch.clip(centers - width, min=0)  # [..., 1]
+    end = torch.clip(centers + width + 1, max=N)  # [..., 1]
+    idx_masks = (idx >= start) & (idx < end)  # [..., N]
+    weights = probs * idx_masks  # [..., N]
+    product_sum = torch.sum(weights * center_values, dim=-1)  # [...]
+    weight_sum = torch.sum(weights, dim=-1)  # [..., T]
     values = product_sum / (weight_sum + 1e-8)  # avoid dividing by zero, [..., T]
     presence = probs.amax(dim=-1) >= threshold  # [..., T]
     return values, presence
