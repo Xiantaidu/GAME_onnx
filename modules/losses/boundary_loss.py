@@ -5,7 +5,7 @@ from torch import nn, Tensor
 from torch.nn import functional as F
 
 
-class BoundaryEarthMoversDistanceLoss(torch.nn.Module):
+class EarthMoversDistanceLoss(torch.nn.Module):
     """
     This loss computes the Earth Mover's Distance (EMD) between predicted and ground truth boundary sequences.
     Arguments:
