@@ -24,7 +24,8 @@ from modules.midi_extraction import SegmentationModel
 from .data import BaseDataset
 from .pl_module_base import BaseLightningModule
 
-D3PM_SAMPLE_STEPS = 20
+D3PM_SAMPLE_STEPS = 5
+D3PM_MAX_P_SPLIT = 0.25
 
 
 class SegmentationDataset(BaseDataset):
@@ -82,8 +83,8 @@ class SegmentationLightningModule(BaseLightningModule):
             regions_pred = mask.long()  # initialize with a whole region
             for i in range(D3PM_SAMPLE_STEPS):
                 t = i * timestep
-                p = self.d3pm_time_schedule(t)
-                noise = self.d3pm_noise(regions_pred, p=p)  # [B, T]
+                p_merge, p_split = self.d3pm_time_schedule(t)
+                noise = self.d3pm_noise(regions_pred, p_merge=p_merge, p_split=p_split)  # [B, T]
                 velocities, latent = self.model(
                     spectrogram, regions=noise, t=t,
                     language=language_ids, mask=mask
@@ -104,8 +105,8 @@ class SegmentationLightningModule(BaseLightningModule):
             }
         else:
             t = torch.rand(B, device=spectrogram.device)
-            p = self.d3pm_time_schedule(t)  # [B]
-            noise = self.d3pm_noise(regions, p=p)  # [B, T]
+            p_merge, p_split = self.d3pm_time_schedule(t)
+            noise = self.d3pm_noise(regions, p_merge=p_merge, p_split=p_split)  # [B, T]
             velocities, latent = self.model(
                 spectrogram, regions=noise, t=t,
                 language=language_ids, mask=mask
@@ -118,21 +119,13 @@ class SegmentationLightningModule(BaseLightningModule):
             }
 
     def d3pm_time_schedule(self, t: torch.Tensor) -> torch.Tensor:
-        """
-        :param t: time, [B] 0~1
-        :return: p [B] 0~1
-        """
-        p = (torch.cos(t * torch.pi) + 1) / 2
-        return p
+        p_merge = (1 + torch.cos(t * torch.pi)) / 2
+        p_split = (1 - torch.cos(t * 2 * torch.pi)) / 2 * D3PM_MAX_P_SPLIT
+        return p_merge, p_split
 
-    def d3pm_noise(self, regions: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
-        """
-        :param regions: [B, T]
-        :param p: [B]
-        :return: noised regions [B, T]
-        """
-        regions = merge_random_regions(regions, p)
-        regions = split_random_regions(regions, p)
+    def d3pm_noise(self, regions: torch.Tensor, p_merge: torch.Tensor, p_split: torch.Tensor) -> torch.Tensor:
+        regions = merge_random_regions(regions, p=p_merge)
+        regions = split_random_regions(regions, p=p_split)
         return regions
 
     def plot_validation_results(self, sample: dict[str, torch.Tensor], outputs: dict[str, torch.Tensor]) -> None:
