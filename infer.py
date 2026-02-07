@@ -197,6 +197,12 @@ def extract(
         tempo: float,
         output_dir: pathlib.Path,
 ):
+    if ts is None:
+        ts = _t0_nstep_to_ts(t0, nsteps)
+    filemap = _parse_filemap(path, exts, glob)
+    if output_dir is None:
+        output_dir = path if path.is_dir() else path.parent
+
     from lightning_utilities.core.rank_zero import rank_zero_info
     from inference.api import (
         load_segmentation_inference_model,
@@ -208,15 +214,9 @@ def extract(
     from inference.callbacks import SaveMidiCallback
 
     segmentation_model, lang_map = load_segmentation_inference_model(seg)
-
     estimation_model = load_estimation_inference_model(est)
-
     language_id = _get_language_id(language, lang_map)
-    if ts is None:
-        ts = _t0_nstep_to_ts(t0, nsteps)
-    filemap = _parse_filemap(path, exts, glob)
-    if output_dir is None:
-        output_dir = path if path.is_dir() else path.parent
+
     seg_sr = segmentation_model.inference_config.features.audio_sample_rate
     if seg_sr != (est_sr := estimation_model.inference_config.features.audio_sample_rate):
         logging.warning(
