@@ -77,7 +77,7 @@ class PeriodicModelCheckpoint(FriendlyModelCheckpoint):
             every_n_train_steps=every_n_train_steps,
             every_n_epochs=every_n_epochs,
             save_on_train_epoch_end=save_on_epoch_end,
-            enable_version_counter=False,
+            # enable_version_counter=False,
         )
         self.unit = unit
         self.since_m_units = since_m_units
@@ -155,7 +155,7 @@ class ExpressionModelCheckpoint(FriendlyModelCheckpoint):
             save_weights_only=save_weights_only,
             mode=mode,
             auto_insert_metric_name=False,
-            enable_version_counter=False,
+            # enable_version_counter=False,
         )
         self.expression = parsed_expr
         self.metric_key = metric_key

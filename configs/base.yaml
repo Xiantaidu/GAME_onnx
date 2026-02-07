@@ -26,7 +26,7 @@ training:
       max_db: 6
   dataloader:
     max_batch_frames: 20000
-    max_batch_size: 20
+    max_batch_size: 8
     max_val_batch_frames: 20000
     max_val_batch_size: 16
     frame_count_grid: 6
