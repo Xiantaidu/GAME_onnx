@@ -33,6 +33,7 @@ def collate_nd(values, pad_value=0, max_len=None):
 class BaseDataset(torch.utils.data.Dataset):
     __non_zero_paddings__ = {
         "spectrogram": math.log(1e-5),
+        "spectrogram_dirty": math.log(1e-5),
     }
 
     def __init__(
