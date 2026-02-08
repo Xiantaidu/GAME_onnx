@@ -6,6 +6,15 @@ import numpy as np
 from matplotlib.ticker import MultipleLocator
 
 
+def spectrogram_to_figure(spectrogram, title=None):
+    fig = plt.figure(figsize=(12, 3))
+    plt.pcolor(spectrogram.T, vmin=-14, vmax=4)
+    if title is not None:
+        plt.title(title, fontsize=15)
+    plt.tight_layout()
+    return fig
+
+
 def similarity_to_figure(similarities, durations, title=None):
     dur_cumsum = np.cumsum(durations)
     fig = plt.figure(figsize=(9, 9))

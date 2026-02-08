@@ -1,3 +1,4 @@
+import glob
 import pathlib
 from typing import Annotated, Any, Literal, Union
 
@@ -121,7 +122,7 @@ class ModelConfig(ConfigBaseModel):
 
 class PitchShiftingAugmentationConfig(ConfigBaseModel):
     enabled: bool = Field(False)
-    prob: float = Field(0.5, ge=0.0, le=1.0)
+    prob: float = Field(0.5, gt=0.0, le=1.0)
     min_semitones: float = Field(-12.0)
     max_semitones: float = Field(12.0, json_schema_extra={
         "dynamic_check": DynamicCheck(
@@ -133,7 +134,7 @@ class PitchShiftingAugmentationConfig(ConfigBaseModel):
 
 class LoudnessScalingAugmentationConfig(ConfigBaseModel):
     enabled: bool = Field(False)
-    prob: float = Field(0.5, ge=0.0, le=1.0)
+    prob: float = Field(0.5, gt=0.0, le=1.0)
     min_db: float = Field(-12.0)
     max_db: float = Field(12.0, json_schema_extra={
         "dynamic_check": DynamicCheck(
@@ -143,12 +144,68 @@ class LoudnessScalingAugmentationConfig(ConfigBaseModel):
     })
 
 
+class SpectrogramMaskingAugmentationConfig(ConfigBaseModel):
+    enabled: bool = Field(False)
+    time_mask_prob: float = Field(0.15, gt=0.0, le=1.0)
+    time_mask_max_width: int = Field(50, gt=0)
+    freq_mask_prob: float = Field(0.15, gt=0.0, le=1.0)
+    freq_mask_max_width: int = Field(20, gt=0, json_schema_extra={
+        "dynamic_check": DynamicCheck(
+            expr=this() < ref("binarizer.features.spectrogram.num_bins"),
+            message="freq_mask_max_width must be less than num_bins."
+        )
+    })
+    intersect_prob: float = Field(0.5, gt=0.0, le=1.0)
+
+
+class ColoredNoiseAugmentationConfig(ConfigBaseModel):
+    enabled: bool = Field(False)
+    prob: float = Field(0.25, gt=0.0, le=1.0)
+    min_exponent: float = Field(0)
+    max_exponent: float = Field(2.0, json_schema_extra={
+        "dynamic_check": DynamicCheck(
+            expr=this() >= ref("training.augmentation.colored_noise.min_exponent"),
+            message="max_exponent must be greater than or equal to min_exponent."
+        )
+    })
+
+
+class NaturalNoiseAugmentationConfig(ConfigBaseModel):
+    enabled: bool = Field(False)
+    prob: float = Field(0.25, gt=0.0, le=1.0)
+    noise_path_glob: str = Field("data/noise/**/*.wav")
+
+    @property
+    def noise_file_list(self) -> list[str]:
+        if not hasattr(self, "_noise_file_list"):
+            # noinspection PyAttributeOutsideInit
+            self._noise_file_list = glob.glob(self.noise_path_glob, recursive=True)
+        return self._noise_file_list
+
+
+class RIRReverbAugmentationConfig(ConfigBaseModel):
+    enabled: bool = Field(False)
+    prob: float = Field(0.25, gt=0.0, le=1.0)
+    kernel_path_glob: str = Field("data/reverb/**/*.wav")
+
+    @property
+    def kernel_file_list(self) -> list[str]:
+        if not hasattr(self, "_kernel_file_list"):
+            # noinspection PyAttributeOutsideInit
+            self._kernel_file_list = glob.glob(self.kernel_path_glob, recursive=True)
+        return self._kernel_file_list
+
+
 class AugmentationConfig(ConfigBaseModel):
     features: BinarizerFeaturesConfig = Field(None, json_schema_extra={
         "dynamic_expr": ref("binarizer.features")
     })
     pitch_shifting: PitchShiftingAugmentationConfig = Field(...)
     loudness_scaling: LoudnessScalingAugmentationConfig = Field(...)
+    spectrogram_masking: SpectrogramMaskingAugmentationConfig = Field(...)
+    colored_noise: ColoredNoiseAugmentationConfig = Field(...)
+    natural_noise: NaturalNoiseAugmentationConfig = Field(...)
+    rir_reverb: RIRReverbAugmentationConfig = Field(...)
 
 
 class RegionLossConfig(ConfigBaseModel):

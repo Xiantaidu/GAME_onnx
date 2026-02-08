@@ -127,6 +127,7 @@ def run_inference(
         num_workers=num_workers,
         prefetch_factor=2 if num_workers > 0 else None,
         shuffle=False,
+        persistent_workers=num_workers > 0,
         collate_fn=dataset.collate if hasattr(dataset, "collate") else None,
     )
     trainer.predict(module, dataloader)
