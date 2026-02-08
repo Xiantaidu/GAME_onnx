@@ -149,7 +149,7 @@ def shared_options(func):
         click.option(
             "--est-threshold", type=click.FloatRange(
                 min=0, min_open=False, max=1, max_open=True
-            ), default=0.2, show_default=True,
+            ), default=0.5, show_default=True,
             help="Presence detecting threshold for estimation model."
         ),
     ]

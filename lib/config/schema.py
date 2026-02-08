@@ -376,7 +376,7 @@ class ValidationConfig(ConfigBaseModel):
     boundary_matching_tolerance: int = Field(5, ge=0, json_schema_extra={
         "scope": ConfigurationScope.SEGMENTATION
     })
-    note_presence_threshold: float = Field(0.2, gt=0, le=1, json_schema_extra={
+    note_presence_threshold: float = Field(0.5, gt=0, le=1, json_schema_extra={
         "scope": ConfigurationScope.ESTIMATION
     })
     note_accuracy_tolerances: list[float] = Field([0.5], min_length=1, json_schema_extra={
