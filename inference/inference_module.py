@@ -12,7 +12,7 @@ class InferenceModule(lightning.pytorch.LightningModule):
             self,
             segmentation_model: SegmentationInferenceModel,
             estimation_model: EstimationInferenceModel,
-            segmentation_threshold: float = 0.3,
+            segmentation_threshold: float = 0.2,
             segmentation_radius: float = 0.02,
             segmentation_d3pm_ts: list[float] = None,
             estimation_threshold: float = 0.2,

@@ -37,13 +37,9 @@ training:
       neighborhood_size: 5
       exponential_decay: true
     boundary_loss:
-      radius: 20
-      decay_start: 20
-      decay_width: 20
-      decay_alpha: 0.5
-      decay_power: 2.0
+      std: 1.0
   validation:
-    d3pm_sample_steps: 5
-    boundary_decoding_threshold: 0.3
+    d3pm_sample_steps: 8
+    boundary_decoding_threshold: 0.2
     boundary_decoding_radius: 2
     boundary_matching_tolerance: 5

@@ -4,16 +4,17 @@ from torch import nn
 
 from lib.plot import (
     similarity_to_figure,
-    distance_boundary_to_figure,
     boundary_to_figure,
 )
 from modules.d3pm import d3pm_region_noise, merge_random_regions
-from modules.decoding import decode_boundaries_from_velocities
+from modules.decoding import (
+    decode_soft_boundaries,
+)
 from modules.losses import (
-    ApproachingMomentumLoss,
+    GaussianSoftBoundaryLoss,
     RegionalCosineSimilarityLoss,
 )
-from modules.losses.boundary_loss import distance_transform
+from modules.losses.boundary_loss import gaussian_soften_boundaries
 from modules.losses.region_loss import self_cosine_similarity
 from modules.metrics import (
     AverageChamferDistance,
@@ -40,13 +41,10 @@ class SegmentationLightningModule(BaseLightningModule):
             neighborhood_size=self.training_config.loss.region_loss.neighborhood_size,
             exponential_decay=self.training_config.loss.region_loss.exponential_decay,
         ))
-        self.register_loss("boundary_loss", ApproachingMomentumLoss(
-            radius=self.training_config.loss.boundary_loss.radius,
-            decay_start=self.training_config.loss.boundary_loss.decay_start,
-            decay_width=self.training_config.loss.boundary_loss.decay_width,
-            decay_alpha=self.training_config.loss.boundary_loss.decay_alpha,
-            decay_power=self.training_config.loss.boundary_loss.decay_power,
+        self.register_loss("boundary_loss", GaussianSoftBoundaryLoss(
+            std=self.training_config.loss.boundary_loss.std,
         ))
+        # noinspection PyAttributeOutsideInit
         self._register_metrics()
         if self.use_parallel_dirty_metrics:
             self._register_metrics(postfix="_dirty")
@@ -75,7 +73,7 @@ class SegmentationLightningModule(BaseLightningModule):
         mask = regions != 0
 
         if infer:
-            velocities, boundaries_pred, latent = self._forward_infer(
+            soft_boundaries, boundaries_pred, latent = self._forward_infer(
                 spectrogram, language_ids=language_ids, mask=mask
             )
             similarities = self_cosine_similarity(latent)  # [B, T, T]
@@ -96,16 +94,15 @@ class SegmentationLightningModule(BaseLightningModule):
 
             return {
                 "similarities": similarities,
-                "velocities": velocities,
+                "soft_boundaries": soft_boundaries,
                 "boundaries": boundaries_pred,
             }
         else:
-            velocities, latent = self._forward_train(
+            logits, latent = self._forward_train(
                 spectrogram, language_ids=language_ids, regions=regions, mask=mask
             )
             region_loss = self.losses["region_loss"](latent, regions)
-            boundary_loss = self.losses["boundary_loss"](velocities, boundaries, mask=mask)
-
+            boundary_loss = self.losses["boundary_loss"](logits, boundaries, mask=mask)
             return {
                 "region_loss": region_loss,
                 "boundary_loss": boundary_loss,
@@ -120,26 +117,26 @@ class SegmentationLightningModule(BaseLightningModule):
         elif self.model_config.mode == "completion":
             # Choose random p, merge regions by p
             t = None
-            p = torch.randn(B, device=spectrogram.device)
+            p = torch.rand(B, device=spectrogram.device)
             noise = merge_random_regions(regions, p=p)
         else:
             raise ValueError(f"Unknown mode: {self.model_config.mode}.")
 
-        velocities, latent = self.model(
+        logits, latent = self.model(
             spectrogram, regions=noise, t=t,
             language=language_ids, mask=mask,
         )  # [B, T]
 
-        return velocities, latent
+        return logits, latent
 
     def _forward_infer(self, spectrogram, language_ids, mask):
         B = spectrogram.shape[0]
         if self.model_config.mode == "d3pm":
-            # 1. Initialize with a whole region.
+            # 1. Initialize with a whole region (no boundaries).
             # 2. Merge regions by p(t) before each step.
-            # 3. Predict full regions.
+            # 3. Predict full boundaries.
             latent = None
-            velocities = None
+            soft_boundaries = None
             boundaries_pred = None
             num_steps = self.training_config.validation.d3pm_sample_steps
             timestep = torch.full(
@@ -150,31 +147,34 @@ class SegmentationLightningModule(BaseLightningModule):
             for i in range(num_steps):
                 t = i * timestep
                 noise = d3pm_region_noise(regions_pred, t=t)  # [B, T]
-                velocities, latent = self.model(
+                logits, latent_ = self.model(
                     spectrogram, regions=noise, t=t,
                     language=language_ids, mask=mask,
                 )  # [B, T]
-                boundaries_pred = decode_boundaries_from_velocities(
-                    velocities, mask=mask,
-                    threshold=self.training_config.validation.boundary_decoding_threshold,
-                    radius=self.training_config.validation.boundary_decoding_radius,
-                )
+                if i == 0:
+                    latent = latent_
+                soft_boundaries, boundaries_pred = self._decode_boundaries(logits, mask)
                 regions_pred = (boundaries_pred.long().cumsum(dim=-1) + 1) * mask.long()
         elif self.model_config.mode == "completion":
-            # One-step prediction from a whole region.
-            velocities, latent = self.model(
+            # One-step prediction from a whole region (no boundaries).
+            logits, latent = self.model(
                 spectrogram, regions=mask.long(),
                 language=language_ids, mask=mask,
             )  # [B, T]
-            boundaries_pred = decode_boundaries_from_velocities(
-                velocities, mask=mask,
-                threshold=self.training_config.validation.boundary_decoding_threshold,
-                radius=self.training_config.validation.boundary_decoding_radius,
-            )
+            soft_boundaries, boundaries_pred = self._decode_boundaries(logits, mask)
         else:
             raise ValueError(f"Unknown mode: {self.model_config.mode}.")
 
-        return velocities, boundaries_pred, latent
+        return soft_boundaries, boundaries_pred, latent
+
+    def _decode_boundaries(self, logits, mask):
+        soft_boundaries = logits.sigmoid()
+        boundaries = decode_soft_boundaries(
+            boundaries=soft_boundaries, mask=mask,
+            threshold=self.training_config.validation.boundary_decoding_threshold,
+            radius=self.training_config.validation.boundary_decoding_radius,
+        )
+        return soft_boundaries, boundaries
 
     def _update_metrics(self, boundaries_pred: torch.Tensor, boundaries_gt: torch.Tensor, postfix: str = ""):
         self.metrics[f"average_chamfer_distance{postfix}"].update(boundaries_pred, boundaries_gt)
@@ -190,7 +190,7 @@ class SegmentationLightningModule(BaseLightningModule):
             durations = sample["durations"][i, :N]  # [N]
             boundaries = sample["boundaries"][i, :T]  # [T]
             similarities = outputs["similarities"][i, :T, :T]  # [T, T]
-            velocities = outputs["velocities"][i, :T]  # [T]
+            soft_boundaries_pred = outputs["soft_boundaries"][i, :T]  # [T]
             boundaries_pred = outputs["boundaries"][i, :T]  # [T]
 
             match_pred_to_target, match_target_to_pred = match_nearest_boundaries(
@@ -200,20 +200,18 @@ class SegmentationLightningModule(BaseLightningModule):
             boundaries_fp = boundaries_pred & ~match_pred_to_target
             boundaries_fn = boundaries & ~match_target_to_pred
 
-            distance_gt = distance_transform(boundaries, max_distance=self.training_config.loss.boundary_loss.radius)
-            distance_pred = velocities.cumsum(dim=0)
+            soft_boundaries_gt = gaussian_soften_boundaries(
+                boundaries, std=self.training_config.loss.boundary_loss.std
+            )
             threshold = self.training_config.validation.boundary_decoding_threshold
-            d_min = distance_pred.min().cpu().numpy().item()
-            d_max = distance_pred.max().cpu().numpy().item()
-            threshold_denorm = threshold * (d_max - d_min + 1e-8) + d_min
 
             self.plot_regions(
                 data_idx, similarities, durations,
                 title=self.valid_dataset.info["item_paths"][data_idx]
             )
-            self.plot_distance(
-                data_idx, distance_gt, distance_pred,
-                threshold=threshold_denorm,
+            self.plot_boundaries(
+                data_idx, soft_boundaries_gt, soft_boundaries_pred,
+                threshold=threshold,
                 boundaries_tp=boundaries_tp,
                 boundaries_fp=boundaries_fp,
                 boundaries_fn=boundaries_fn,
@@ -232,17 +230,17 @@ class SegmentationLightningModule(BaseLightningModule):
             similarities, durations, title=title
         ), global_step=self.global_step)
 
-    def plot_distance(
+    def plot_boundaries(
             self, idx: int,
-            distance_gt: torch.Tensor, distance_pred: torch.Tensor,
+            boundaries_gt: torch.Tensor, boundaries_pred: torch.Tensor,
             threshold: float = None,
             boundaries_tp: torch.Tensor = None,
             boundaries_fp: torch.Tensor = None,
             boundaries_fn: torch.Tensor = None,
             title=None
     ):
-        distance_gt = distance_gt.cpu().numpy()
-        distance_pred = distance_pred.cpu().numpy()
+        boundaries_gt = boundaries_gt.cpu().numpy()
+        boundaries_pred = boundaries_pred.cpu().numpy()
         if boundaries_tp is not None:
             boundaries_tp = boundaries_tp.cpu().numpy()
         if boundaries_fp is not None:
@@ -250,28 +248,11 @@ class SegmentationLightningModule(BaseLightningModule):
         if boundaries_fn is not None:
             boundaries_fn = boundaries_fn.cpu().numpy()
         logger: TensorBoardLogger = self.logger
-        logger.experiment.add_figure(f"boundaries/boundaries_{idx}", distance_boundary_to_figure(
-            distance_gt, distance_pred,
+        logger.experiment.add_figure(f"boundaries/boundaries_{idx}", boundary_to_figure(
+            boundaries_gt, boundaries_pred,
             threshold=threshold,
             boundaries_tp=boundaries_tp,
             boundaries_fp=boundaries_fp,
             boundaries_fn=boundaries_fn,
             title=title
-        ), global_step=self.global_step)
-
-    def plot_boundaries(
-            self, idx: int,
-            boundaries_gt: torch.Tensor, boundaries_pred: torch.Tensor,
-            durations_gt: torch.Tensor = None, durations_pred: torch.Tensor = None,
-            title=None
-    ):
-        boundaries_gt = boundaries_gt.cpu().numpy()
-        boundaries_pred = boundaries_pred.cpu().numpy()
-        if durations_gt is not None:
-            durations_gt = durations_gt.cpu().numpy()
-        if durations_pred is not None:
-            durations_pred = durations_pred.cpu().numpy()
-        logger: TensorBoardLogger = self.logger
-        logger.experiment.add_figure(f"boundaries/boundaries_{idx}", boundary_to_figure(
-            boundaries_gt, boundaries_pred, dur_gt=durations_gt, dur_pred=durations_pred, title=title
         ), global_step=self.global_step)

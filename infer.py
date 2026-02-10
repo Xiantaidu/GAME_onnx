@@ -121,7 +121,7 @@ def shared_options(func):
         click.option(
             "--seg-threshold", type=click.FloatRange(
                 min=0, min_open=False, max=1, max_open=True
-            ), default=0.3, show_default=True,
+            ), default=0.2, show_default=True,
             help="Boundary decoding threshold for segmentation model."
         ),
         click.option(
@@ -135,7 +135,7 @@ def shared_options(func):
             help="Starting T value (t0) for segmentation model."
         ),
         click.option(
-            "--nsteps", "--seg-d3pm-nsteps", type=click.IntRange(min=1), default=4, show_default=True,
+            "--nsteps", "--seg-d3pm-nsteps", type=click.IntRange(min=1), default=8, show_default=True,
             help="Number of D3PM sampling steps for segmentation model."
         ),
         click.option(

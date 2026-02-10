@@ -1,34 +1,75 @@
-import math
-
 import torch
 from torch import nn, Tensor
 from torch.nn import functional as F
 
 
-class EarthMoversDistanceLoss(torch.nn.Module):
+class GaussianSoftBoundaryLoss(nn.Module):
+    """
+    Loss between predicted boundaries with gaussian-softened target boundaries.
+    Arguments:
+        std: float, standard deviation for gaussian softening. Larger std means softer targets.
+    Inputs:
+        - logits: Tensor of shape [..., T], predicted boundary logits (before sigmoid).
+        - boundaries: Tensor of shape [..., T], ground truth boundary indicators, 0 = no boundary, 1 = boundary.
+        - mask: Optional Tensor of shape [..., T], mask to apply on the loss.
+    Outputs:
+        Scalar tensor representing the loss.
+    """
+
+    def __init__(self, std: float = 1.0):
+        super().__init__()
+        self.std = std
+        self.criterion = nn.BCEWithLogitsLoss(reduction="none")
+
+    def forward(self, logits: Tensor, boundaries: Tensor, mask=None):
+        if mask is not None:
+            boundaries = boundaries & mask
+            mask = mask.float()
+        targets = gaussian_soften_boundaries(boundaries, std=self.std)
+        loss = self.criterion(logits, targets)
+        if mask is not None:
+            loss = (loss * mask).sum() / (mask.sum() + 1e-6)
+        else:
+            loss = loss.mean()
+        return loss
+
+
+class EarthMoversDistanceLoss(nn.Module):
     """
     This loss computes the Earth Mover's Distance (EMD) between predicted and ground truth boundary sequences.
     Arguments:
         bidirectional: bool, if True, computes EMD in both forward and backward directions and averages the results.
     Inputs:
-        - pred: Tensor of shape [B, T], predicted boundary probabilities.
-        - gt: Tensor of shape [B, T], ground truth boundary indicators, 0 = no boundary, 1 = boundary.
+        - boundaries_pred: Tensor of shape [..., T], predicted boundary probabilities.
+        - boundaries_target: Tensor of shape [..., T], ground truth boundary indicators, 0 = no boundary, 1 = boundary.
     Outputs:
         Scalar tensor representing the EMD loss.
     """
 
     def __init__(self, bidirectional=False):
         super().__init__()
-        self.criterion = torch.nn.L1Loss()
+        self.criterion = nn.L1Loss(reduction="sum")
         self.bidirectional = bidirectional
 
-    def forward(self, pred, gt):
-        scale = math.sqrt(gt.shape[1])
-        gt = gt.float()
-        loss = self.criterion(pred.cumsum(dim=1) / scale, gt.cumsum(dim=1) / scale)
+    def forward(self, boundaries_pred: Tensor, boundaries_target: Tensor, mask=None):
+        boundaries_target = boundaries_target.float()
+        if mask is None:
+            numel = boundaries_target.numel()
+        else:
+            numel = mask.float().sum()
+            boundaries_pred = torch.where(mask, boundaries_pred, 0.0)
+            boundaries_target = torch.where(mask, boundaries_target, 0.0)
+        scale = boundaries_target.sum(dim=-1, keepdim=True).clamp(min=1.0)
+        loss = self.criterion(
+            boundaries_pred.cumsum(dim=-1) / scale,
+            boundaries_target.cumsum(dim=-1) / scale,
+        ) / numel
         if self.bidirectional:
-            loss += self.criterion(pred.flip(1).cumsum(dim=1) / scale, gt.flip(1).cumsum(dim=1) / scale)
-            loss /= 2
+            loss_flip = self.criterion(
+                boundaries_pred.flip(-1).cumsum(dim=-1) / scale,
+                boundaries_target.flip(-1).cumsum(dim=-1) / scale,
+            ) / numel
+            loss = (loss + loss_flip) / 2
         return loss
 
 
@@ -96,22 +137,33 @@ class ApproachingMomentumLoss(nn.Module):
         return loss
 
 
-def distance_transform(boundaries: Tensor, max_distance: int = None) -> Tensor:
+def distance_transform(
+        boundaries: Tensor, max_distance: int = None, edges=True
+) -> Tensor:
     """
     Compute the distance transform for binary boundary indicators.
-    For consistency with cases where there are no boundaries, we pad boundaries with 1s at both ends.
     For each position, compute the distance to the nearest boundary (where boundary == 1).
     :param boundaries: [..., T], 1 = boundary, 0 = non-boundary
     :param max_distance: int, maximum distance to consider
+    :param edges: bool, if True, both edges of the sequence are considered as boundaries;
+        otherwise, infinite distance can appear if there are no boundaries in the sequence.
     :return: [..., T]
     """
-    boundaries = F.pad(boundaries, (1, 1), mode="constant", value=1)
+    if edges:
+        boundaries = F.pad(boundaries, (1, 1), mode="constant", value=1)
     indices = torch.arange(
         boundaries.shape[-1], dtype=torch.float32, device=boundaries.device,
     ).view([1] * (boundaries.ndim - 1) + [-1])  # [..., T]
     masked_indices = torch.where(boundaries, indices, torch.full_like(indices, fill_value=float("inf")))
     distance = torch.abs(indices.unsqueeze(-1) - masked_indices.unsqueeze(-2)).amin(dim=-1)
-    distance = distance[..., 1:-1]
+    if edges:
+        distance = distance[..., 1:-1]
     if max_distance is not None:
         distance = torch.clamp(distance, max=max_distance)
     return distance
+
+
+def gaussian_soften_boundaries(boundaries: Tensor, std: float = 1.0):
+    distance = distance_transform(boundaries, edges=False)
+    softened = torch.exp(-0.5 * (distance / std) ** 2)
+    return softened

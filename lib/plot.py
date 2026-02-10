@@ -1,5 +1,3 @@
-import math
-
 import matplotlib.patches
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,8 +30,8 @@ def similarity_to_figure(similarities, durations, title=None):
     return fig
 
 
-def distance_boundary_to_figure(
-        distance_gt: np.ndarray, distance_pred: np.ndarray,
+def boundary_to_figure(
+        boundaries_gt: np.ndarray, boundaries_pred: np.ndarray,
         threshold: float = None,
         boundaries_tp: np.ndarray = None,
         boundaries_fp: np.ndarray = None,
@@ -42,17 +40,17 @@ def distance_boundary_to_figure(
 ):
     figure_width = 12
     figure_height = 6
-    fig = plt.figure(figsize=(12, 6))
-    plt.plot(distance_gt, color="b", label="gt")
-    plt.plot(distance_pred, color="r", label="pred")
+    fig = plt.figure(figsize=(figure_width, figure_height))
+    plt.plot(boundaries_gt, color="b", label="gt")
+    plt.plot(boundaries_pred, color="r", label="pred")
     if threshold is not None:
-        plt.plot([0, distance_gt.shape[0]], [threshold, threshold], color="black", linestyle="--")
-    positions = np.arange(distance_gt.shape[0], dtype=np.int64)
+        plt.plot([0, boundaries_gt.shape[0]], [threshold, threshold], color="black", linestyle="--")
+    positions = np.arange(boundaries_gt.shape[0], dtype=np.int64)
     circle_radius = 10
-    x_min = -1
-    x_max = distance_gt.shape[0]
-    y_min = min(0, distance_gt.min(), distance_pred.min()) - 1
-    y_max = min(distance_gt.max(), distance_pred.max()) + 1
+    x_min = 0
+    x_max = boundaries_gt.shape[0]
+    y_min = 0
+    y_max = 1.1
     ratio = (figure_width / figure_height) * (y_max - y_min) / (x_max - x_min)
 
     def _draw_circles(x_index, y_arr, color, label):
@@ -69,38 +67,13 @@ def distance_boundary_to_figure(
             label_added = True
 
     if boundaries_tp is not None:
-        _draw_circles(positions[boundaries_tp], distance_pred, "green", "match")
+        _draw_circles(positions[boundaries_tp], boundaries_pred, "green", "match")
     if boundaries_fp is not None:
-        _draw_circles(positions[boundaries_fp], distance_pred, "orange", "exceed")
+        _draw_circles(positions[boundaries_fp], boundaries_pred, "orange", "exceed")
     if boundaries_fn is not None:
-        _draw_circles(positions[boundaries_fn], distance_gt, "grey", "miss")
-    plt.xlim(-1, distance_gt.shape[0])
+        _draw_circles(positions[boundaries_fn], boundaries_gt, "grey", "miss")
+    plt.xlim(-1, boundaries_gt.shape[0])
     plt.ylim(y_min, y_max)
-    plt.grid(axis="y")
-    plt.legend()
-    if title is not None:
-        plt.title(title, fontsize=15)
-    plt.tight_layout()
-    return fig
-
-
-def boundary_to_figure(
-        bounds_gt: np.ndarray, bounds_pred: np.ndarray,
-        dur_gt: np.ndarray = None, dur_pred: np.ndarray = None,
-        title=None
-):
-    fig = plt.figure(figsize=(12, 6))
-    bounds_acc_gt = np.cumsum(bounds_gt)
-    bounds_acc_pred = np.cumsum(bounds_pred)
-    plt.plot(bounds_acc_gt, color="b", label="gt")
-    plt.plot(bounds_acc_pred, color="r", label="pred")
-    if dur_gt is not None and dur_pred is not None:
-        height = math.ceil(max(bounds_acc_gt[-1], bounds_acc_pred[-1]))
-        dur_acc_gt = np.cumsum(dur_gt)
-        dur_acc_pred = np.cumsum(dur_pred)
-        plt.vlines(dur_acc_gt[:-1], 0, height / 2, colors="b", linestyles="--")
-        plt.vlines(dur_acc_pred[:-1], height / 2, height, colors="r", linestyles="--")
-    plt.gca().yaxis.set_major_locator(MultipleLocator(1))
     plt.grid(axis="y")
     plt.legend()
     if title is not None:

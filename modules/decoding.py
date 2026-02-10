@@ -23,6 +23,44 @@ def find_local_minima(x: Tensor, threshold: float, radius: int = 2):
     return minima
 
 
+def find_local_extremum(x: Tensor, threshold: float, radius: int = 2, maxima=True):
+    """
+    Find local minima in the last dimension of x within a given radius and below/above a threshold.
+    :param x: [..., T]
+    :param threshold: ignore values above this threshold
+    :param radius: int, radius for local minima search
+    :param maxima: bool, if True, find local maxima; otherwise, find local minima
+    :return: [..., T], 1 = minima, 0 = non-minima
+    """
+    assert radius >= 1
+    infinite = float("+inf") if maxima else float("-inf")
+    x_pad = F.pad(
+        x, (radius, radius),
+        mode="constant", value=infinite
+    )  # [..., T + 2r]
+    windows = x_pad.unfold(dimension=-1, size=2 * radius + 1, step=1)  # [..., T, 2r+1]
+    if maxima:
+        maxima = (windows.argmax(dim=-1) == radius) & (x >= threshold)  # [..., T]
+        return maxima
+    else:
+        minima = (windows.argmin(dim=-1) == radius) & (x <= threshold)  # [..., T]
+        return minima
+
+
+def decode_soft_boundaries(
+        boundaries: Tensor, barriers: Tensor = None, mask: Tensor = None,
+        threshold: float = 0.5, radius: int = 2
+):
+    if mask is not None:
+        boundaries = torch.where(mask, boundaries, float("+inf"))
+    if barriers is not None:
+        boundaries = torch.masked_fill(boundaries, barriers, float("+inf"))
+    maxima = find_local_extremum(boundaries, threshold=threshold, radius=radius, maxima=True)
+    if mask is not None:
+        maxima &= mask
+    return maxima
+
+
 def decode_boundaries_from_velocities(
         velocities: Tensor, barriers: Tensor = None, mask: Tensor = None,
         threshold: float = 0.2, radius: int = 2
@@ -57,6 +95,7 @@ def decode_boundaries_from_velocities(
     if mask is not None:
         boundaries &= mask
     return boundaries
+
 
 def decode_boundaries_from_velocities_with_confidences(
         velocities: Tensor, barriers: Tensor = None, mask: Tensor = None,
@@ -95,17 +134,6 @@ def decode_boundaries_from_velocities_with_confidences(
     confidences=confidences*boundaries
     confidences = confidences.clamp(0.0, 1.0)
     return boundaries,confidences
-
-def decode_quantized_boundaries(boundaries: Tensor):
-    """
-    Decode quantized boundary indicators from blurred boundary probabilities.
-    :param boundaries: float [..., T], boundary probabilities, should be in [0, 1]
-    :return: bool [..., T], 1 = boundary, 0 = non-boundary
-    """
-    boundaries_step = boundaries.cumsum(dim=-1).round().long()
-    boundaries_diff = boundaries_step[..., 1:] > boundaries_step[..., :-1]
-    return F.pad(boundaries_diff, (1, 0), mode="constant", value=1)
-
 
 def decode_cascaded_dial_pointers(
         beam: Tensor, dials: Tensor, periods: list[float]

@@ -69,8 +69,8 @@ class SegmentationModel(nn.Module):
         if self.use_language_embedding:
             x = x + self.language_embedding(language.unsqueeze(-1))
         x, latent = self.segmenter(x, mask=mask)
-        velocities = x.squeeze(-1).tanh()
-        return velocities, latent
+        x = x.squeeze(-1)
+        return x, latent
 
 
 class EstimationModel(nn.Module):

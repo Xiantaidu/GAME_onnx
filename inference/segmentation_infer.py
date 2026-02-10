@@ -6,7 +6,7 @@ from lib.config.schema import ModelConfig, InferenceConfig
 from lib.feature.mel import StretchableMelSpectrogram
 from modules.commons.tts_modules import LengthRegulator
 from modules.d3pm import d3pm_region_noise
-from modules.decoding import decode_boundaries_from_velocities
+from modules.decoding import decode_soft_boundaries
 from modules.midi_extraction import SegmentationModel
 
 
@@ -32,6 +32,22 @@ class SegmentationInferenceModel(nn.Module):
         )
         self.lr = LengthRegulator()
         self.model = SegmentationModel(model_config)
+
+    def _forward_and_decode(
+            self, spectrogram, regions, mask,
+            threshold, radius,
+            language=None, t=None,
+    ):
+        logits, _ = self.model(
+            spectrogram, regions=regions, t=t,
+            language=language, mask=mask,
+        )  # [B, T]
+        soft_boundaries = logits.sigmoid()
+        boundaries = decode_soft_boundaries(
+            boundaries=soft_boundaries, mask=mask,
+            threshold=threshold, radius=radius,
+        )  # [B, T]
+        return boundaries
 
     def forward(
             self, waveform: Tensor,
@@ -65,25 +81,17 @@ class SegmentationInferenceModel(nn.Module):
                 ti = t[i]
                 if i > 0:
                     regions = d3pm_region_noise(regions, t=ti)
-                velocities, _ = self.model(
+                boundaries_ = self._forward_and_decode(
                     spectrogram, regions=regions, t=ti,
                     language=language, mask=mask,
-                )  # [B, T]
-                boundaries_ = decode_boundaries_from_velocities(
-                    velocities, mask=mask,
-                    threshold=threshold,
-                    radius=radius,
+                    threshold=threshold, radius=radius,
                 )  # [B, T]
                 regions = ((boundaries_.long()).cumsum(dim=1) + 1) * mask_long
         elif self.model_config.mode == "completion":
-            velocities, _ = self.model(
+            boundaries_ = self._forward_and_decode(
                 spectrogram, regions=regions,
                 language=language, mask=mask,
-            )  # [B, T]
-            boundaries_ = decode_boundaries_from_velocities(
-                velocities, mask=mask,
-                threshold=threshold,
-                radius=radius,
+                threshold=threshold, radius=radius,
             )  # [B, T]
             regions = ((boundaries_.long()).cumsum(dim=1) + 1) * mask_long
         else:

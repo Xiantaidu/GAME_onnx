@@ -223,11 +223,7 @@ class RegionLossConfig(ConfigBaseModel):
 
 
 class BoundaryLossConfig(ConfigBaseModel):
-    radius: int = Field(20, gt=0)
-    decay_start: int = Field(20)
-    decay_width: int = Field(20)
-    decay_alpha: float = Field(0.5)
-    decay_power: float = Field(2.0)
+    std: float = Field(1.0, gt=0)
 
 
 class NoteLossConfig(ConfigBaseModel):
