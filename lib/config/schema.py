@@ -7,13 +7,12 @@ from pydantic import Field, field_validator
 from .core import ConfigBaseModel
 from .ops import (
     ConfigOperationBase, ConfigOperationContext,
-    ref, this, ctx, if_, exists, coalesce, min_
+    ref, this, ctx, if_, exists, coalesce
 )
 
 
 class ConfigurationScope:
-    SEGMENTATION = 0x1
-    ESTIMATION = 0x2
+    pass
 
 
 class DynamicCheck:
@@ -85,43 +84,22 @@ class BackboneConfig(ConfigBaseModel):
 
 
 class ModelConfig(ConfigBaseModel):
-    mode: Literal["completion", "d3pm"] = Field("d3pm", json_schema_extra={
-        "scope": ConfigurationScope.SEGMENTATION
-    })
-    use_languages: bool = Field(True, json_schema_extra={
-        "scope": ConfigurationScope.SEGMENTATION
-    })
-    num_languages: int = Field(127, ge=0, json_schema_extra={
-        "scope": ConfigurationScope.SEGMENTATION
-    })
+    mode: Literal["completion", "d3pm"] = Field("d3pm")
+    use_languages: bool = Field(True)
+    num_languages: int = Field(127, ge=0)
     region_cycle_len: int = Field(3)
     in_dim: int = Field(None, json_schema_extra={
         "dynamic_expr": ref("binarizer.features.spectrogram.num_bins")
     })
     embedding_dim: int = Field(128, gt=0)
     estimator_out_dim: int = Field(None, json_schema_extra={
-        "scope": ConfigurationScope.ESTIMATION,
         "dynamic_expr": ref("training.loss.note_loss.midi_num_bins")
     })
-    use_glu: bool = Field(False, json_schema_extra={
-        "scope": ConfigurationScope.ESTIMATION
-    })
-    encoder: BackboneConfig = Field(None, json_schema_extra={
-        "scope": ConfigurationScope.ESTIMATION,
-        "dynamic_check": RequiredOnGivenScope(ConfigurationScope.ESTIMATION),
-    })
-    segmenter: BackboneConfig = Field(None, json_schema_extra={
-        "scope": ConfigurationScope.SEGMENTATION,
-        "dynamic_check": RequiredOnGivenScope(ConfigurationScope.SEGMENTATION),
-    })
-    adaptor: BackboneConfig = Field(None, json_schema_extra={
-        "scope": ConfigurationScope.ESTIMATION,
-        "dynamic_check": RequiredOnGivenScope(ConfigurationScope.SEGMENTATION),
-    })
-    estimator: BackboneConfig = Field(None, json_schema_extra={
-        "scope": ConfigurationScope.ESTIMATION,
-        "dynamic_check": RequiredOnGivenScope(ConfigurationScope.SEGMENTATION),
-    })
+    use_glu: bool = Field(False)
+    encoder: BackboneConfig = Field(...)
+    segmenter: BackboneConfig = Field(...)
+    adaptor: BackboneConfig = Field(...)
+    estimator: BackboneConfig = Field(...)
 
 
 class PitchShiftingAugmentationConfig(ConfigBaseModel):
@@ -239,14 +217,8 @@ class NoteLossConfig(ConfigBaseModel):
 
 class LossConfig(ConfigBaseModel):
     region_loss: RegionLossConfig = Field(...)
-    boundary_loss: BoundaryLossConfig = Field(None, json_schema_extra={
-        "scope": ConfigurationScope.SEGMENTATION,
-        "dynamic_check": RequiredOnGivenScope(ConfigurationScope.SEGMENTATION),
-    })
-    note_loss: NoteLossConfig = Field(None, json_schema_extra={
-        "scope": ConfigurationScope.ESTIMATION,
-        "dynamic_check": RequiredOnGivenScope(ConfigurationScope.ESTIMATION),
-    })
+    boundary_loss: BoundaryLossConfig = Field(...)
+    note_loss: NoteLossConfig = Field(...)
 
 
 class DataLoaderConfig(ConfigBaseModel):
@@ -357,31 +329,13 @@ class TrainerConfig(ConfigBaseModel):
 class ValidationConfig(ConfigBaseModel):
     max_plots: int = Field(100, ge=0)
     parallel_dirty_metrics: bool = Field(True)
-    boundary_drop_probability: float = Field(0.8, gt=0, le=1, json_schema_extra={
-        "scope": ConfigurationScope.SEGMENTATION
-    })
-    d3pm_sample_steps: int = Field(5, gt=0, json_schema_extra={
-        "scope": ConfigurationScope.SEGMENTATION
-    })
-    boundary_decoding_threshold: float = Field(0.3, gt=0, le=1, json_schema_extra={
-        "scope": ConfigurationScope.SEGMENTATION
-    })
-    boundary_decoding_radius: int = Field(2, gt=0, json_schema_extra={
-        "scope": ConfigurationScope.SEGMENTATION
-    })
-    boundary_matching_tolerance: int = Field(5, ge=0, json_schema_extra={
-        "scope": ConfigurationScope.SEGMENTATION
-    })
-    note_presence_threshold: float = Field(0.5, gt=0, le=1, json_schema_extra={
-        "scope": ConfigurationScope.ESTIMATION
-    })
-    note_accuracy_tolerances: list[float] = Field([0.5], min_length=1, json_schema_extra={
-        "scope": ConfigurationScope.ESTIMATION,
-        "dynamic_check": DynamicCheck(
-            expr=min_(this()) > 0,
-            message="All note accuracy tolerances must be greater than 0."
-        )
-    })
+    d3pm_sample_steps: int = Field(8, gt=0)
+    boundary_decoding_threshold: float = Field(0.3, gt=0, le=1)
+    boundary_decoding_radius: int = Field(2, gt=0)
+    boundary_matching_tolerance: int = Field(5, ge=0)
+    note_presence_threshold: float = Field(0.2, gt=0, le=1)
+    pitch_accuracy_tolerance: float = Field(0.5, gt=0)
+    pitch_overlap_width: float = Field(0.5, gt=0)
 
 
 class FinetuningConfig(ConfigBaseModel):
@@ -423,19 +377,15 @@ class InferenceConfig(ConfigBaseModel):
         "dynamic_expr": ref("binarizer.features")
     })
     midi_min: float = Field(None, json_schema_extra={
-        "scope": ConfigurationScope.ESTIMATION,
         "dynamic_expr": ref("training.loss.note_loss.midi_min")
     })
     midi_max: float = Field(None, json_schema_extra={
-        "scope": ConfigurationScope.ESTIMATION,
         "dynamic_expr": ref("training.loss.note_loss.midi_max")
     })
     midi_num_bins: int = Field(None, json_schema_extra={
-        "scope": ConfigurationScope.ESTIMATION,
         "dynamic_expr": ref("training.loss.note_loss.midi_num_bins")
     })
     midi_std: float = Field(None, json_schema_extra={
-        "scope": ConfigurationScope.ESTIMATION,
         "dynamic_expr": ref("training.loss.note_loss.midi_std")
     })
 

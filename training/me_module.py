@@ -83,13 +83,13 @@ class MIDIExtractionModule(BaseLightningModule):
         ))
         self.register_metric(f"raw_pitch_rmse{postfix}", RawPitchRMSE())
         self.register_metric(f"raw_pitch_accuracy{postfix}", RawPitchAccuracy(
-            tolerance=0.5,
+            tolerance=self.training_config.validation.pitch_accuracy_tolerance,
         ))
         self.register_metric(f"overall_accuracy{postfix}", OverallAccuracy(
-            tolerance=0.5,
+            tolerance=self.training_config.validation.pitch_accuracy_tolerance,
         ))
         self.register_metric(f"overlap_metric_collection{postfix}", NoteOverlapMetricCollection(
-            pitch_width=0.5, postfix=postfix
+            pitch_width=self.training_config.validation.pitch_overlap_width, postfix=postfix
         ))
 
     def forward_model(self, sample: dict[str, torch.Tensor], infer: bool) -> dict[str, torch.Tensor]:

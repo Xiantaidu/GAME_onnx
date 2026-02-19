@@ -3,7 +3,6 @@ from torch import nn, Tensor
 
 from lib.config.schema import ModelConfig, InferenceConfig
 from lib.feature.mel import StretchableMelSpectrogram
-from modules.commons.tts_modules import LengthRegulator
 from modules.d3pm import (
     d3pm_time_schedule,
     remove_mutable_boundaries,
@@ -40,7 +39,6 @@ class SegmentationEstimationInferenceModel(nn.Module):
             fmax=inference_config.features.spectrogram.fmax,
             clip_val=1e-5,
         )
-        self.lr = LengthRegulator()
         self.model = SegmentationEstimationModel(model_config)
 
     def _forward_and_decode_boundaries(
@@ -116,10 +114,10 @@ class SegmentationEstimationInferenceModel(nn.Module):
             for i in range(Nt):
                 ti = torch.full((B,), fill_value=t[i], device=waveform.device)
                 p = d3pm_time_schedule(ti)
-                boundaries_noised = remove_mutable_boundaries(boundaries, known_boundaries, p=p)
-                regions_noised = boundaries_to_regions(boundaries_noised, mask=t_mask)  # [B, T]
+                boundaries_noisy = remove_mutable_boundaries(boundaries, known_boundaries, p=p)
+                regions_noisy = boundaries_to_regions(boundaries_noisy, mask=t_mask)  # [B, T]
                 boundaries = self._forward_and_decode_boundaries(
-                    x_seg, regions=regions_noised, t=ti,
+                    x_seg, regions=regions_noisy, t=ti,
                     language=language, mask=t_mask,
                     barriers=known_boundaries,
                     threshold=boundary_threshold,

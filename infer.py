@@ -238,7 +238,7 @@ def extract(
     from lightning_utilities.core.rank_zero import rank_zero_info
     from inference.api import (
         load_inference_model,
-        run_inference,
+        infer_model,
     )
     from inference.slicer2 import Slicer
     from inference.data import SlicedAudioFileIterableDataset
@@ -276,7 +276,7 @@ def extract(
             pitch_format=pitch_format,
             round_pitch=round_pitch,
         ))
-    run_inference(
+    infer_model(
         model=model,
         dataset=dataset,
         batch_size=batch_size,

@@ -10,19 +10,15 @@ from torch import Tensor
 from lib import logging
 from lib.config.core import ConfigBaseModel
 from lib.config.formatter import ModelFormatter
-from .me_infer import SegmentationEstimationInferenceModel
-from .segmentation_infer import SegmentationInferenceModel
-from .estimation_infer import EstimationInferenceModel
+from lib.config.schema import ModelConfig, InferenceConfig
 from .inference_module import InferenceModule
-from lib.config.schema import ModelConfig, InferenceConfig, ConfigurationScope
+from .me_infer import SegmentationEstimationInferenceModel
 
 __all__ = [
     "load_config_for_inference",
     "load_state_dict_for_inference",
     "load_inference_model",
-    "load_segmentation_inference_model",
-    "load_estimation_inference_model",
-    "run_inference",
+    "infer_model",
 ]
 
 
@@ -57,8 +53,7 @@ def load_state_dict_for_inference(path: pathlib.Path, ema=True) -> dict[str, Ten
 
 def load_inference_model(path: pathlib.Path) -> tuple[SegmentationEstimationInferenceModel, dict[str, int] | None]:
     model_config, inference_config = load_config_for_inference(
-        path.parent / "config.yaml",
-        scope=ConfigurationScope.SEGMENTATION | ConfigurationScope.ESTIMATION
+        path.parent / "config.yaml"
     )
     model = SegmentationEstimationInferenceModel(model_config=model_config, inference_config=inference_config)
     state_dict = load_state_dict_for_inference(path)
@@ -80,50 +75,7 @@ def load_inference_model(path: pathlib.Path) -> tuple[SegmentationEstimationInfe
     return model, lang_map
 
 
-def load_segmentation_inference_model(path: pathlib.Path) -> tuple[SegmentationInferenceModel, dict[str, int] | None]:
-    model_config, inference_config = load_config_for_inference(
-        path.parent / "config.yaml",
-        scope=ConfigurationScope.SEGMENTATION
-    )
-
-    model = SegmentationInferenceModel(model_config=model_config, inference_config=inference_config)
-    state_dict = load_state_dict_for_inference(path)
-    model.load_state_dict(state_dict, strict=True)
-    model.eval()
-    if model_config.use_languages:
-        lang_map_path = path.parent / "lang_map.json"
-        if not lang_map_path.exists():
-            raise FileNotFoundError(f"Language map file not found for segmentation model: {lang_map_path}")
-        with open(lang_map_path, "r") as f:
-            lang_map = json.load(f)
-    else:
-        lang_map = None
-
-    logging.info(f"Loaded segmentation model from \'{path}\'.", callback=rank_zero_info)
-    _log_config(model_config)
-    _log_config(inference_config)
-
-    return model, lang_map
-
-
-def load_estimation_inference_model(path: pathlib.Path) -> EstimationInferenceModel:
-    model_config, inference_config = load_config_for_inference(
-        path.parent / "config.yaml",
-        scope=ConfigurationScope.ESTIMATION
-    )
-    model = EstimationInferenceModel(model_config=model_config, inference_config=inference_config)
-    state_dict = load_state_dict_for_inference(path)
-    model.load_state_dict(state_dict, strict=True)
-    model.eval()
-
-    logging.info(f"Loaded estimation model from \'{path}\'.", callback=rank_zero_info)
-    _log_config(model_config)
-    _log_config(inference_config)
-
-    return model
-
-
-def run_inference(
+def infer_model(
         model: SegmentationEstimationInferenceModel,
         dataset: torch.utils.data.Dataset,
         batch_size: int,

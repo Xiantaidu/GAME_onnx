@@ -104,3 +104,5 @@ training:
     boundary_decoding_radius: 2
     boundary_matching_tolerance: 5
     note_presence_threshold: 0.2
+    pitch_accuracy_tolerance: 0.5
+    pitch_overlap_width: 0.5
