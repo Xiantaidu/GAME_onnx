@@ -7,14 +7,13 @@ from pydantic import Field, field_validator
 from .core import ConfigBaseModel
 from .ops import (
     ConfigOperationBase, ConfigOperationContext,
-    ref, this, ctx, if_, exists, coalesce, len_, min_
+    ref, this, ctx, if_, exists, coalesce, min_
 )
 
 
 class ConfigurationScope:
     SEGMENTATION = 0x1
     ESTIMATION = 0x2
-    GAME = SEGMENTATION | ESTIMATION
 
 
 class DynamicCheck:
@@ -96,16 +95,20 @@ class ModelConfig(ConfigBaseModel):
         "scope": ConfigurationScope.SEGMENTATION
     })
     region_cycle_len: int = Field(3)
-    in_channels: int = Field(None, json_schema_extra={
+    in_dim: int = Field(None, json_schema_extra={
         "dynamic_expr": ref("binarizer.features.spectrogram.num_bins")
     })
     embedding_dim: int = Field(128, gt=0)
-    estimator_out_channels: int = Field(None, json_schema_extra={
+    estimator_out_dim: int = Field(None, json_schema_extra={
         "scope": ConfigurationScope.ESTIMATION,
-        "dynamic_expr": (len_(ref("training.loss.note_loss.dial_periods")) * 2 + 2)
+        "dynamic_expr": ref("training.loss.note_loss.midi_num_bins")
     })
     use_glu: bool = Field(False, json_schema_extra={
         "scope": ConfigurationScope.ESTIMATION
+    })
+    encoder: BackboneConfig = Field(None, json_schema_extra={
+        "scope": ConfigurationScope.ESTIMATION,
+        "dynamic_check": RequiredOnGivenScope(ConfigurationScope.ESTIMATION),
     })
     segmenter: BackboneConfig = Field(None, json_schema_extra={
         "scope": ConfigurationScope.SEGMENTATION,
@@ -118,13 +121,6 @@ class ModelConfig(ConfigBaseModel):
     estimator: BackboneConfig = Field(None, json_schema_extra={
         "scope": ConfigurationScope.ESTIMATION,
         "dynamic_check": RequiredOnGivenScope(ConfigurationScope.SEGMENTATION),
-    })
-    spectrogram_encoder: BackboneConfig = Field(None, json_schema_extra={
-        "scope": ConfigurationScope.ESTIMATION,
-        "dynamic_check": RequiredOnGivenScope(ConfigurationScope.ESTIMATION),
-    })
-    use_spectrogram_encoder_glu: bool = Field(True, json_schema_extra={
-        "scope": ConfigurationScope.ESTIMATION
     })
 
 
@@ -236,13 +232,9 @@ class BoundaryLossConfig(ConfigBaseModel):
 
 class NoteLossConfig(ConfigBaseModel):
     midi_min: float = Field(0.0)
-    midi_max: float = Field(127.0)
-    dial_periods: list[float] = Field(..., min_length=1, json_schema_extra={
-        "dynamic_check": DynamicCheck(
-            expr=min_(this()) > 0,
-            message="All dial periods must be greater than 0."
-        )
-    })
+    midi_max: float = Field(128.0)
+    midi_num_bins: int = Field(257, gt=0)
+    midi_std: float = Field(0.5, gt=0)
 
 
 class LossConfig(ConfigBaseModel):
@@ -438,9 +430,13 @@ class InferenceConfig(ConfigBaseModel):
         "scope": ConfigurationScope.ESTIMATION,
         "dynamic_expr": ref("training.loss.note_loss.midi_max")
     })
-    note_dial_periods: list[float] = Field(None, json_schema_extra={
+    midi_num_bins: int = Field(None, json_schema_extra={
         "scope": ConfigurationScope.ESTIMATION,
-        "dynamic_expr": ref("training.loss.note_loss.dial_periods")
+        "dynamic_expr": ref("training.loss.note_loss.midi_num_bins")
+    })
+    midi_std: float = Field(None, json_schema_extra={
+        "scope": ConfigurationScope.ESTIMATION,
+        "dynamic_expr": ref("training.loss.note_loss.midi_std")
     })
 
 

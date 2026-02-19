@@ -10,6 +10,7 @@ from torch import Tensor
 from lib import logging
 from lib.config.core import ConfigBaseModel
 from lib.config.formatter import ModelFormatter
+from .me_infer import SegmentationEstimationInferenceModel
 from .segmentation_infer import SegmentationInferenceModel
 from .estimation_infer import EstimationInferenceModel
 from .inference_module import InferenceModule
@@ -18,6 +19,7 @@ from lib.config.schema import ModelConfig, InferenceConfig, ConfigurationScope
 __all__ = [
     "load_config_for_inference",
     "load_state_dict_for_inference",
+    "load_inference_model",
     "load_segmentation_inference_model",
     "load_estimation_inference_model",
     "run_inference",
@@ -51,6 +53,31 @@ def load_state_dict_for_inference(path: pathlib.Path, ema=True) -> dict[str, Ten
     if not state_dict:
         raise KeyError(f"No valid state dict found in checkpoint: {path}.")
     return state_dict
+
+
+def load_inference_model(path: pathlib.Path) -> tuple[SegmentationEstimationInferenceModel, dict[str, int] | None]:
+    model_config, inference_config = load_config_for_inference(
+        path.parent / "config.yaml",
+        scope=ConfigurationScope.SEGMENTATION | ConfigurationScope.ESTIMATION
+    )
+    model = SegmentationEstimationInferenceModel(model_config=model_config, inference_config=inference_config)
+    state_dict = load_state_dict_for_inference(path)
+    model.load_state_dict(state_dict, strict=True)
+    model.eval()
+    if model_config.use_languages:
+        lang_map_path = path.parent / "lang_map.json"
+        if not lang_map_path.exists():
+            raise FileNotFoundError(f"Language map file not found for segmentation model: {lang_map_path}")
+        with open(lang_map_path, "r") as f:
+            lang_map = json.load(f)
+    else:
+        lang_map = None
+
+    logging.info(f"Loaded model from \'{path}\'.", callback=rank_zero_info)
+    _log_config(model_config)
+    _log_config(inference_config)
+
+    return model, lang_map
 
 
 def load_segmentation_inference_model(path: pathlib.Path) -> tuple[SegmentationInferenceModel, dict[str, int] | None]:
@@ -97,8 +124,7 @@ def load_estimation_inference_model(path: pathlib.Path) -> EstimationInferenceMo
 
 
 def run_inference(
-        segmentation_model: SegmentationInferenceModel,
-        estimation_model: EstimationInferenceModel,
+        model: SegmentationEstimationInferenceModel,
         dataset: torch.utils.data.Dataset,
         batch_size: int,
         num_workers: int,
@@ -109,8 +135,7 @@ def run_inference(
         estimation_threshold: float = 0.2,
 ):
     module = InferenceModule(
-        segmentation_model=segmentation_model,
-        estimation_model=estimation_model,
+        model=model,
         segmentation_threshold=segmentation_threshold,
         segmentation_radius=segmentation_radius,
         segmentation_d3pm_ts=segmentation_d3pm_ts,

@@ -93,21 +93,14 @@ def main():
 def shared_options(func):
     options = [
         click.option(
-            "--seg", type=click.Path(
+            "-m", "--model", type=click.Path(
                 exists=True, dir_okay=False, file_okay=True, readable=True, path_type=pathlib.Path
             ),
             required=True,
-            help="Path to the segmentation model."
+            help="Path to the model."
         ),
         click.option(
-            "--est", type=click.Path(
-                exists=True, dir_okay=False, file_okay=True, readable=True, path_type=pathlib.Path
-            ),
-            required=True,
-            help="Path to the estimation model."
-        ),
-        click.option(
-            "--language", type=str, default=None, show_default=False,
+            "-l", "--language", type=str, default=None, show_default=False,
             help="Language code for better segmentation if supported."
         ),
         click.option(
@@ -149,7 +142,7 @@ def shared_options(func):
         click.option(
             "--est-threshold", type=click.FloatRange(
                 min=0, min_open=False, max=1, max_open=True
-            ), default=0.5, show_default=True,
+            ), default=0.2, show_default=True,
             help="Presence detecting threshold for estimation model."
         ),
     ]
@@ -166,7 +159,7 @@ def shared_options(func):
 )
 @shared_options
 @click.option(
-    "--exts", type=str, default="wav,flac,mp3,aac,ogg", show_default=True,
+    "--input-formats", type=str, default="wav,flac,mp3,aac,ogg", show_default=True,
     callback=_validate_exts,
     help=(
             "List of audio file extensions to process, separated by commas. "
@@ -218,8 +211,7 @@ def shared_options(func):
 )
 def extract(
         path: pathlib.Path,
-        seg: pathlib.Path,
-        est: pathlib.Path,
+        model: pathlib.Path,
         language: str,
         batch_size: int,
         num_workers: int,
@@ -229,7 +221,7 @@ def extract(
         nsteps: int,
         ts: list[float],
         est_threshold: float,
-        exts: set[str],
+        input_formats: set[str],
         glob: str,
         output_formats: set[str],
         pitch_format: str,
@@ -239,36 +231,28 @@ def extract(
 ):
     if ts is None:
         ts = _t0_nstep_to_ts(t0, nsteps)
-    filemap = _parse_filemap(path, exts, glob)
+    filemap = _parse_filemap(path, input_formats, glob)
     if output_dir is None:
         output_dir = path if path.is_dir() else path.parent
 
     from lightning_utilities.core.rank_zero import rank_zero_info
     from inference.api import (
-        load_segmentation_inference_model,
-        load_estimation_inference_model,
+        load_inference_model,
         run_inference,
     )
     from inference.slicer2 import Slicer
     from inference.data import SlicedAudioFileIterableDataset
     from inference.callbacks import SaveMidiCallback, SaveTextCallback
 
-    segmentation_model, lang_map = load_segmentation_inference_model(seg)
-    estimation_model = load_estimation_inference_model(est)
+    model, lang_map = load_inference_model(model)
     language_id = _get_language_id(language, lang_map)
 
-    seg_sr = segmentation_model.inference_config.features.audio_sample_rate
-    if seg_sr != (est_sr := estimation_model.inference_config.features.audio_sample_rate):
-        logging.warning(
-            f"Samplerate of segmentation model ({seg_sr}) differs from segmentation model ({est_sr}). "
-            "Audio will be resampled during inference, which may affect performance.",
-            callback=rank_zero_info
-        )
+    sr = model.inference_config.features.audio_sample_rate
     dataset = SlicedAudioFileIterableDataset(
         filemap=filemap,
-        samplerate=seg_sr,
+        samplerate=sr,
         slicer=Slicer(
-            sr=seg_sr,
+            sr=sr,
         ),
         language=language_id,
     )
@@ -293,8 +277,7 @@ def extract(
             round_pitch=round_pitch,
         ))
     run_inference(
-        segmentation_model=segmentation_model,
-        estimation_model=estimation_model,
+        model=model,
         dataset=dataset,
         batch_size=batch_size,
         num_workers=num_workers,

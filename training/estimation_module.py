@@ -260,8 +260,7 @@ class EstimationLightningModule(BaseLightningModule):
         presence_pred = presence_pred.cpu().numpy()
         logger: TensorBoardLogger = self.logger
         logger.experiment.add_figure(f"notes/notes_{idx}", note_to_figure(
-            durations,
-            note_midi_gt=scores_gt, note_rest_gt=~presence_gt,
-            note_midi_pred=scores_pred, note_rest_pred=~presence_pred,
+            note_midi_gt=scores_gt, note_rest_gt=~presence_gt, note_dur_gt=durations,
+            note_midi_pred=scores_pred, note_rest_pred=~presence_pred, note_dur_pred=durations,
             title=title
         ), global_step=self.global_step)

@@ -11,7 +11,7 @@ class GaussianBlurredBinsLoss(nn.Module):
         min_val: float, minimum value of the score range.
         max_val: float, maximum value of the score range.
         num_bins: int, number of bins (N) to quantize the score range.
-        deviation: float, standard deviation of the Gaussian blur in the original score scale.
+        std: float, standard deviation of the Gaussian blur in the original score scale.
     Inputs:
         - logits: Tensor of shape [..., T, N], predicted logits for each bin.
         - scores: Tensor of shape [..., T], target scores.
@@ -21,12 +21,12 @@ class GaussianBlurredBinsLoss(nn.Module):
         Scalar tensor representing the Gaussian blurred bins loss.
     """
 
-    def __init__(self, min_val: float, max_val: float, num_bins: int, deviation: float):
+    def __init__(self, min_val: float, max_val: float, num_bins: int, std: float):
         super().__init__()
         self.min_val = min_val
         self.max_val = max_val
         self.num_bins = num_bins
-        self.std = deviation / (max_val - min_val) * (num_bins - 1)
+        self.std = std / (max_val - min_val) * (num_bins - 1)
         centers = torch.linspace(min_val, max_val, num_bins)
         self.register_buffer("centers", centers, persistent=False)
         self.criterion = nn.BCEWithLogitsLoss(reduction="none")

@@ -1,10 +1,10 @@
 from torch import nn, Tensor
 
-from inference.functional import format_regions
 from lib.config.schema import ModelConfig, InferenceConfig
 from lib.feature.mel import StretchableMelSpectrogram
 from modules.commons.tts_modules import LengthRegulator
 from modules.decoding import decode_cascaded_dial_pointers
+from modules.functional import format_regions
 from modules.midi_extraction import EstimationModel
 
 

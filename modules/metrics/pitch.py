@@ -1,5 +1,3 @@
-from typing import Any
-
 import torch
 import torchmetrics
 from torch import Tensor
@@ -43,15 +41,13 @@ class NotePresenceMetricCollection(torchmetrics.Metric):
         self.fp += (pred_presence & ~target_presence).float().mul(weights).sum()
         self.fn += (~pred_presence & target_presence).float().mul(weights).sum()
 
-    def compute(self) -> Any:
+    def compute(self) -> dict[str, Tensor]:
         precision = self.tp / (self.tp + self.fp + 1e-6)
         recall = self.tp / (self.tp + self.fn + 1e-6)
-        tnr = self.tn / (self.tn + self.fp + 1e-6)
         f1_score = 2 * precision * recall / (precision + recall + 1e-6)
         return {
             f"presence_precision{self.postfix}": precision,
             f"presence_recall{self.postfix}": recall,
-            f"presence_tnr{self.postfix}": tnr,
             f"presence_f1_score{self.postfix}": f1_score,
         }
 
@@ -89,7 +85,7 @@ class RawPitchRMSE(torchmetrics.Metric):
         self.squared_error += (squared_errors * weights).sum()
         self.total += (target_presence.float() * weights).sum()
 
-    def compute(self) -> Any:
+    def compute(self) -> Tensor:
         return torch.sqrt(self.squared_error / (self.total + 1e-6))
 
 
@@ -130,7 +126,7 @@ class RawPitchAccuracy(torchmetrics.Metric):
         self.correct += (correct.float() * weights).sum()
         self.total += (total.float() * weights).sum()
 
-    def compute(self) -> Any:
+    def compute(self) -> Tensor:
         return self.correct / (self.total + 1e-6)
 
 
@@ -173,5 +169,5 @@ class OverallAccuracy(torchmetrics.Metric):
         self.correct += (correct.float() * weights).sum()
         self.total += weights.sum()
 
-    def compute(self) -> Any:
+    def compute(self) -> Tensor:
         return self.correct / (self.total + 1e-6)

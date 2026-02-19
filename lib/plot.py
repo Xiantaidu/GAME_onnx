@@ -99,17 +99,15 @@ def probs_to_figure(
 
 
 def note_to_figure(
-        note_dur, note_midi_gt, note_rest_gt,
-        note_midi_pred=None, note_rest_pred=None,
+        note_midi_gt, note_rest_gt, note_dur_gt,
+        note_midi_pred=None, note_rest_pred=None, note_dur_pred=None,
         title=None
 ):
     fig = plt.figure(figsize=(12, 6))
-    note_dur_acc = np.cumsum(note_dur)
     note_height = 0.5
 
-    def draw_notes(note_midi, note_rest, color, label):
-        if note_rest is None:
-            note_rest = np.zeros_like(note_midi, dtype=np.bool_)
+    def draw_notes(note_midi, note_rest, note_dur, color, label):
+        note_dur_acc = np.cumsum(note_dur)
         ys = note_midi[~note_rest]
         x_mins = (note_dur_acc - note_dur)[~note_rest]
         x_maxs = note_dur_acc[~note_rest]
@@ -125,10 +123,14 @@ def note_to_figure(
                 color="none", facecolor=color, alpha=0.2
             )
 
-    plt.gca().yaxis.set_major_locator(MultipleLocator(1))
-    draw_notes(note_midi_gt, note_rest_gt, color="b", label="gt")
+    draw_notes(note_midi_gt, note_rest_gt, note_dur_gt, color="b", label="gt")
+    x_max = note_dur_gt.sum()
     if note_midi_pred is not None:
-        draw_notes(note_midi_pred, note_rest_pred, color="r", label="pred")
+        draw_notes(note_midi_pred, note_rest_pred, note_dur_pred, color="r", label="pred")
+        x_max = max(x_max, note_dur_pred.sum())
+
+    plt.xlim(0, x_max)
+    plt.gca().yaxis.set_major_locator(MultipleLocator(1))
     plt.grid(axis="y")
     plt.legend()
     if title is not None:

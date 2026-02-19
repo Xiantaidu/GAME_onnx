@@ -44,7 +44,6 @@ class SegmentationLightningModule(BaseLightningModule):
         self.register_loss("boundary_loss", GaussianSoftBoundaryLoss(
             std=self.training_config.loss.boundary_loss.std,
         ))
-        # noinspection PyAttributeOutsideInit
         self._register_metrics()
         if self.use_parallel_dirty_metrics:
             self._register_metrics(postfix="_dirty")
