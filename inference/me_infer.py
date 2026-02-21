@@ -29,7 +29,7 @@ class SegmentationEstimationInferenceModel(nn.Module):
         self.model_config = model_config
         self.inference_config = inference_config
         self.timestep = self.inference_config.features.timestep
-        self.mel_spectrogram = StretchableMelSpectrogram(
+        self.to_spectrogram = StretchableMelSpectrogram(
             sample_rate=inference_config.features.audio_sample_rate,
             n_mels=inference_config.features.spectrogram.num_bins,
             n_fft=inference_config.features.fft_size,
@@ -96,7 +96,7 @@ class SegmentationEstimationInferenceModel(nn.Module):
         :param t: float32 [num_steps]
         :return: durations: float32; presence: bool; scores: float32 [batch_size, num_notes]
         """
-        spectrogram = self.mel_spectrogram(waveform).mT  # [B, T, C]
+        spectrogram = self.to_spectrogram(waveform).mT  # [B, T, C]
         B = waveform.size(0)
         T = spectrogram.size(1)
         Nt = t.size(0)

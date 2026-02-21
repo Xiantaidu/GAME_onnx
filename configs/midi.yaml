@@ -18,7 +18,7 @@ model:
       dim: 256
       num_layers: 4
       num_heads: 8
-      head_dim: 64
+      head_dim: 32
       c_kernel_size: 31
       m_kernel_size: 31
       ffn_type: 'glu' # 'glu', 'ffn', 'cgmlp'
@@ -37,7 +37,7 @@ model:
       latent_layer_idx: 2
       latent_out_dim: 16
       num_heads: 8
-      head_dim: 64
+      head_dim: 32
       c_kernel_size: 31
       m_kernel_size: 31
       ffn_type: 'glu' # 'glu', 'ffn', 'cgmlp'
@@ -52,12 +52,12 @@ model:
     cls: "modules.backbones.EBF.EBFBackbone"
     kwargs:
       dim: 256
-      num_layers: 2
-      latent_layer_idx: 1
+      num_layers: 4
+      latent_layer_idx: 2
       latent_out_dim: 16
       use_out_norm: false
       num_heads: 8
-      head_dim: 64
+      head_dim: 32
       c_kernel_size: 31
       m_kernel_size: 31
       ffn_type: 'glu' # 'glu', 'ffn', 'cgmlp'
@@ -74,7 +74,7 @@ model:
       dim: 256
       num_layers: 4
       num_heads: 8
-      head_dim: 64
+      head_dim: 32
       c_kernel_size: 7
       m_kernel_size: 3
       ffn_type: 'glu' # 'glu', 'ffn', 'cgmlp'

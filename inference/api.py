@@ -11,7 +11,7 @@ from lib import logging
 from lib.config.core import ConfigBaseModel
 from lib.config.formatter import ModelFormatter
 from lib.config.schema import ModelConfig, InferenceConfig
-from .inference_module import InferenceModule
+from .me_infer_module import InferenceModule
 from .me_infer import SegmentationEstimationInferenceModel
 
 __all__ = [
