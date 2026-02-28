@@ -60,6 +60,47 @@ class BaseDataset(torch.utils.data.Dataset):
         self.augmentation_args_map: dict[int, AugmentationArgs] = {}
         self.setup = False
 
+    def __getitem__(self, index):
+        if not self.setup:
+            self._setup()
+            self.setup = True
+        sample = self.data[index]
+        spectrogram = sample["spectrogram"]
+        augmentation = {}
+        if self.augmentation_config is not None:
+            augmentation_args = self.augmentation_args_map.get(index)
+            if augmentation_args is None:
+                # Must be indeterministic if augmentation args are not pre-generated
+                augmentation_args = generate_augmentation_args(
+                    self.augmentation_config,
+                    skip_transforms=self.augmentation_skip_transforms,
+                )
+            # Apply augmentations to spectrogram
+            spectrogram = self._get_augmented_spectrogram(index, spectrogram, augmentation_args)
+            # Convert augmentation args to dict for pickling
+            augmentation = dataclasses.asdict(augmentation_args)
+        spectrogram = torch.clamp(spectrogram, min=math.log(1e-5))
+        if self.augmentation_return_dirty:
+            sample["spectrogram"] = torch.clamp(sample["spectrogram"], min=math.log(1e-5))
+            sample["spectrogram_dirty"] = spectrogram
+        else:
+            sample["spectrogram"] = spectrogram
+        return {
+            "_idx": index,
+            "_name": self.info["item_paths"][index],
+            "_augmentation": augmentation,
+            **sample
+        }
+
+    def __len__(self):
+        return self.info["lengths"].shape[0]
+
+    def set_epoch(self, epoch: int):
+        self.epoch.value = epoch
+
+    def num_frames(self, index: int) -> int:
+        return self.info["lengths"][index]
+
     def _setup(self):
         if self.augmentation_config is None:
             return
@@ -158,47 +199,6 @@ class BaseDataset(torch.utils.data.Dataset):
                 seed=index if self.augmentation_deterministic else None,
             )
         return spectrogram
-
-    def __getitem__(self, index):
-        if not self.setup:
-            self._setup()
-            self.setup = True
-        sample = self.data[index]
-        spectrogram = sample["spectrogram"]
-        augmentation = {}
-        if self.augmentation_config is not None:
-            augmentation_args = self.augmentation_args_map.get(index)
-            if augmentation_args is None:
-                # Must be indeterministic if augmentation args are not pre-generated
-                augmentation_args = generate_augmentation_args(
-                    self.augmentation_config,
-                    skip_transforms=self.augmentation_skip_transforms,
-                )
-            # Apply augmentations to spectrogram
-            spectrogram = self._get_augmented_spectrogram(index, spectrogram, augmentation_args)
-            # Convert augmentation args to dict for pickling
-            augmentation = dataclasses.asdict(augmentation_args)
-        spectrogram = torch.clamp(spectrogram, min=math.log(1e-5))
-        if self.augmentation_return_dirty:
-            sample["spectrogram"] = torch.clamp(sample["spectrogram"], min=math.log(1e-5))
-            sample["spectrogram_dirty"] = spectrogram
-        else:
-            sample["spectrogram"] = spectrogram
-        return {
-            "_idx": index,
-            "_name": self.info["item_paths"][index],
-            "_augmentation": augmentation,
-            **sample
-        }
-
-    def __len__(self):
-        return self.info["lengths"].shape[0]
-
-    def set_epoch(self, epoch: int):
-        self.epoch.value = epoch
-
-    def num_frames(self, index: int) -> int:
-        return self.info["lengths"][index]
 
     @classmethod
     def collate(cls, samples: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
