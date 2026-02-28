@@ -74,12 +74,14 @@ class DiffSingerTranscriptionsDataset(torch.utils.data.Dataset):
             samplerate: int,
             extensions: list[str] = None,
             language: int = 0,
+            use_wb: bool = True,
     ):
         self.samplerate = samplerate
         if extensions is None:
             extensions = [".wav", ".flac"]
         self.extensions = extensions
         self.language = language
+        self.use_wb = use_wb
         self.filelist = filelist
         self.itemlist = []
         for index in filelist:
@@ -107,17 +109,20 @@ class DiffSingerTranscriptionsDataset(torch.utils.data.Dataset):
                 f"Tried candidates: {[fn.as_posix() for fn in candidate_wav_fns]}"
             )
         ph_dur = [float(d) for d in item["ph_dur"].split()]
-        ph_num = [int(n) for n in item["ph_num"].split()]
-        if sum(ph_num) != len(ph_dur):
-            raise ValueError(
-                f"Length mismatch in item \'{name}\' in index \'{index.as_posix()}\': "
-                f"sum(ph_num) = {sum(ph_num)}, len(ph_dur) = {len(ph_dur)}."
-            )
-        word_dur = []
-        idx = 0
-        for num in ph_num:
-            word_dur.append(sum(ph_dur[idx: idx + num]))
-            idx += num
+        if self.use_wb:
+            ph_num = [int(n) for n in item["ph_num"].split()]
+            if sum(ph_num) != len(ph_dur):
+                raise ValueError(
+                    f"Length mismatch in item \'{name}\' in index \'{index.as_posix()}\': "
+                    f"sum(ph_num) = {sum(ph_num)}, len(ph_dur) = {len(ph_dur)}."
+                )
+            word_dur = []
+            idx = 0
+            for num in ph_num:
+                word_dur.append(sum(ph_dur[idx: idx + num]))
+                idx += num
+        else:
+            word_dur = [sum(ph_dur)]
         return {
             "index": index.as_posix(),
             "name": name,

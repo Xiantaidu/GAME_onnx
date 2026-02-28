@@ -102,12 +102,12 @@ def _get_language_id(language: str, lang_map: dict[str, int]) -> int:
     return language_id
 
 
-def _parse_filemap(path: pathlib.Path, exts: set[str], glob: str | None) -> dict[str, pathlib.Path]:
+def _parse_filemap(path: pathlib.Path, exts: set[str], glb: str | None) -> dict[str, pathlib.Path]:
     if path.is_file():
         return {path.name: path}
     elif path.is_dir():
-        if glob:
-            files = [f for f in path.rglob(glob) if f.is_file()]
+        if glb:
+            files = [f for f in path.rglob(glb) if f.is_file()]
         else:
             files = [f for f in path.rglob("*") if f.is_file() and f.suffix.lower() in exts]
         filemap = {
@@ -226,7 +226,7 @@ def shared_options(func=None, *, defaults: dict[str, Any] = None):
     )
 )
 @click.option(
-    "--glob", type=str, default=None, show_default=False,
+    "--glob", "glb", type=str, default=None, show_default=False,
     help=(
             "Glob pattern to filter audio files (i.e. *.wav). "
             "Overrides --exts if provided. Ignored if a single audio file is provided."
@@ -281,7 +281,7 @@ def extract(
         ts: list[float],
         est_threshold: float,
         input_formats: set[str],
-        glob: str,
+        glb: str,
         output_formats: set[str],
         pitch_format: str,
         round_pitch: bool,
@@ -290,7 +290,7 @@ def extract(
 ):
     if ts is None:
         ts = _t0_nstep_to_ts(t0, nsteps)
-    filemap = _parse_filemap(path, input_formats, glob)
+    filemap = _parse_filemap(path, input_formats, glb)
     if output_dir is None:
         output_dir = path if path.is_dir() else path.parent
 
@@ -384,6 +384,13 @@ def extract(
         "Whether to overwrite existing files when saving updated transcriptions."
     )
 )
+@click.option(
+    "--no-wb", is_flag=True, default=False, show_default=True,
+    help=(
+            "Whether to disable word boundaries for better alignment. "
+            "If set, \'ph_num\' field will not be checked and used. Not recommended."
+    )
+)
 def align(
         paths: list[pathlib.Path],
         model: pathlib.Path,
@@ -399,6 +406,7 @@ def align(
         save_path: pathlib.Path,
         save_name: str,
         overwrite: bool,
+        no_wb: bool,
 ):
     if ts is None:
         ts = _t0_nstep_to_ts(t0, nsteps)
@@ -418,6 +426,7 @@ def align(
                 if output_file.exists():
                     raise FileExistsError(f"Output file already exists: {output_file}")
     save_dir = save_path.parent if save_path else None
+    use_wb = not no_wb
 
     from lightning_utilities.core.rank_zero import rank_zero_info
     from inference.api import (
@@ -435,6 +444,7 @@ def align(
         filelist=paths,
         samplerate=sr,
         language=language_id,
+        use_wb=use_wb,
     )
     callbacks = [
         UpdateDiffSingerTranscriptionsCallback(
