@@ -159,6 +159,7 @@ class BaseBinarizer(abc.ABC):
         self.process_items(self.valid_items, prefix="valid", multiprocessing=False)
         self.process_items(self.train_items, prefix="train", multiprocessing=True)
 
+
 def find_waveform_file(subset_dir: pathlib.Path, item_name: str) -> pathlib.Path:
     for ext in ACCEPTED_AUDIO_FORMATS:
         searched_wav_fn = subset_dir / "waveforms" / f"{item_name}{ext}"
