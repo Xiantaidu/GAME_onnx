@@ -886,7 +886,7 @@ class JEBFBackbone(nn.Module): #todo 其他的到时候再说
             use_out_norm: bool = True,
             skip_fist_ffn=False,
             pool_out_dim: int = None,
-            attn_type: str = 'joint',
+            attn_type: str = 'joint',# split
             use_region_bias: bool = False,
             bias_alpha: float = 2.35,
             bias_learnable: bool = False,
