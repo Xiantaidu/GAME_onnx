@@ -1123,7 +1123,7 @@ class JEBFBackbone(nn.Module): #todo 其他的到时候再说
         return attn_bias.unsqueeze(1)  # [B, 1, P+T, P+T]
 
 
-    def forward(self, x, regions, t_mask, n_mask, max_n=None):
+    def forward(self, x, regions, t_mask, n_mask, ):
         """
         Args:
             x: [B, T, in_dim] input tensor
@@ -1136,8 +1136,8 @@ class JEBFBackbone(nn.Module): #todo 其他的到时候再说
             out_x: [B, T, out_dim] output tensor
             out_pool: [B, N, pool_out_dim] pooled output (merged if R>1, else [B, N*R, pool_out_dim])
         """
-        if max_n is None:
-            max_n = n_mask.shape[1]
+
+        max_n = n_mask.shape[1]
 
         B, T, _ = x.shape
         R = self.region_token_num
