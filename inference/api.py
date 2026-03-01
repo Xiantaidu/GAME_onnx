@@ -1,5 +1,6 @@
 import json
 import pathlib
+from typing import Literal
 
 import lightning.pytorch.callbacks
 import torch
@@ -10,12 +11,13 @@ from torch import Tensor
 from lib import logging
 from lib.config.core import ConfigBaseModel
 from lib.config.formatter import ModelFormatter
-from lib.config.schema import ModelConfig, InferenceConfig
+from lib.config.schema import ModelConfig, InferenceConfig, ValidationConfig
 from .me_infer_module import InferenceModule
 from .me_infer import SegmentationEstimationInferenceModel
 
 __all__ = [
     "load_config_for_inference",
+    "load_config_for_evaluation",
     "load_state_dict_for_inference",
     "load_inference_model",
     "infer_model",
@@ -28,7 +30,10 @@ def _log_config(cfg: ConfigBaseModel):
     print(formatter.format(cfg))
 
 
-def load_config_for_inference(path: pathlib.Path, scope: int = 0) -> tuple[ModelConfig, InferenceConfig]:
+def load_config_for_inference(
+        path: pathlib.Path,
+        scope: int = 0
+) -> tuple[ModelConfig, InferenceConfig]:
     if not path.is_file():
         raise FileNotFoundError(f"Config file not found: {path}")
     with open(path, "r", encoding="utf8") as f:
@@ -38,7 +43,26 @@ def load_config_for_inference(path: pathlib.Path, scope: int = 0) -> tuple[Model
     model_config.check(scope_mask=scope)
     inference_config.check(scope_mask=scope)
 
+    _log_config(model_config)
+    _log_config(inference_config)
+
     return model_config, inference_config
+
+
+def load_config_for_evaluation(
+        path: pathlib.Path,
+        scope: int = 0
+) -> ValidationConfig:
+    if not path.is_file():
+        raise FileNotFoundError(f"Config file not found: {path}")
+    with open(path, "r", encoding="utf8") as f:
+        config = yaml.safe_load(f)
+    validation_config = ValidationConfig.model_validate(config["training"]["validation"], scope=scope)
+    validation_config.check(scope_mask=scope)
+
+    _log_config(validation_config)
+
+    return validation_config
 
 
 def load_state_dict_for_inference(path: pathlib.Path, ema=True) -> dict[str, Tensor]:
@@ -69,8 +93,6 @@ def load_inference_model(path: pathlib.Path) -> tuple[SegmentationEstimationInfe
         lang_map = None
 
     logging.info(f"Loaded model from \'{path}\'.", callback=rank_zero_info)
-    _log_config(model_config)
-    _log_config(inference_config)
 
     return model, lang_map
 
@@ -78,21 +100,13 @@ def load_inference_model(path: pathlib.Path) -> tuple[SegmentationEstimationInfe
 def infer_model(
         model: SegmentationEstimationInferenceModel,
         dataset: torch.utils.data.Dataset,
+        config: ValidationConfig,
         batch_size: int,
         num_workers: int,
         callbacks: list[lightning.pytorch.callbacks.Callback],
-        segmentation_threshold: float = 0.3,
-        segmentation_radius: float = 0.02,
-        segmentation_d3pm_ts: list[float] = None,
-        estimation_threshold: float = 0.2,
+        mode: Literal["predict", "evaluate"] = "predict",
 ):
-    module = InferenceModule(
-        model=model,
-        segmentation_threshold=segmentation_threshold,
-        segmentation_radius=segmentation_radius,
-        segmentation_d3pm_ts=segmentation_d3pm_ts,
-        estimation_threshold=estimation_threshold,
-    )
+    module = InferenceModule(model=model, config=config)
     trainer = lightning.pytorch.Trainer(
         logger=False,
         enable_checkpointing=False,
@@ -107,4 +121,9 @@ def infer_model(
         persistent_workers=num_workers > 0,
         collate_fn=dataset.collate if hasattr(dataset, "collate") else None,
     )
-    trainer.predict(module, dataloader)
+    if mode == "predict":
+        trainer.predict(module, dataloader)
+    elif mode == "evaluate":
+        trainer.test(module, dataloader)
+    else:
+        raise ValueError(f"Unknown mode: {mode}")

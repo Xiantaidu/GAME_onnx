@@ -95,10 +95,8 @@ class ModelConfig(ConfigBaseModel):
     estimator_out_dim: int = Field(None, json_schema_extra={
         "dynamic_expr": ref("training.loss.note_loss.midi_num_bins")
     })
-    use_glu: bool = Field(False)
     encoder: BackboneConfig = Field(...)
     segmenter: BackboneConfig = Field(...)
-    adaptor: BackboneConfig = Field(...)
     estimator: BackboneConfig = Field(...)
 
 
@@ -329,13 +327,24 @@ class TrainerConfig(ConfigBaseModel):
 class ValidationConfig(ConfigBaseModel):
     max_plots: int = Field(100, ge=0)
     parallel_dirty_metrics: bool = Field(True)
+    d3pm_sample_t0: float = Field(0.0, ge=0)
     d3pm_sample_steps: int = Field(8, gt=0)
+    d3pm_sample_ts: list[float] = Field(None)
     boundary_decoding_threshold: float = Field(0.3, gt=0, le=1)
     boundary_decoding_radius: int = Field(2, gt=0)
     boundary_matching_tolerance: int = Field(5, ge=0)
     note_presence_threshold: float = Field(0.2, gt=0, le=1)
     pitch_accuracy_tolerance: float = Field(0.5, gt=0)
     pitch_overlap_width: float = Field(0.5, gt=0)
+
+    @property
+    def d3pm_sample_ts_resolved(self):
+        if self.d3pm_sample_ts is not None:
+            return self.d3pm_sample_ts
+        if self.d3pm_sample_steps == 1:
+            return [self.d3pm_sample_t0]
+        step = (1 - self.d3pm_sample_t0) / (self.d3pm_sample_steps - 1)
+        return [self.d3pm_sample_t0 + i * step for i in range(self.d3pm_sample_steps)]
 
 
 class FinetuningConfig(ConfigBaseModel):

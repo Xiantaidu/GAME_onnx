@@ -5,59 +5,50 @@ import click
 from lib import logging
 
 
-def shared_options(func):
-    options = [
-        click.option(
-            "--config", type=click.Path(
-                exists=True, dir_okay=False, file_okay=True, readable=True, path_type=pathlib.Path
-            ),
-            required=True,
-            help="Path to the configuration file."
-        ),
-        click.option(
-            "--override", multiple=True,
-            type=click.STRING, required=False,
-            help="Override configuration values in dotlist format."
-        ),
-        click.option(
-            "--work-dir", type=click.Path(
-                dir_okay=True, file_okay=False, path_type=pathlib.Path
-            ),
-            required=False, default=pathlib.Path(__file__).parent / "experiments",
-            show_default=True,
-            help="Path to the working directory. The experiment subdirectory will be created here."
-        ),
-        click.option(
-            "--exp-name", type=click.STRING,
-            required=True,
-            help="Experiment name. Checkpoints will be saved in subdirectory with this name."
-        ),
-        click.option(
-            "--log-dir", type=click.Path(
-                dir_okay=True, file_okay=False, path_type=pathlib.Path
-            ),
-            required=False,
-            help="Directory to save logs. If not specified, logs will be saved in the checkpoints directory."
-        ),
-        click.option(
-            "--restart", is_flag=True, default=False,
-            help="Ignore existing checkpoints and start new training."
-        ),
-        click.option(
-            "--resume-from", type=click.Path(
-                exists=True, dir_okay=False, file_okay=True, readable=True, path_type=pathlib.Path
-            ),
-            required=False,
-            help="Resume training from this specific checkpoint."
-        ),
-    ]
-    for option in options[::-1]:
-        func = option(func)
-    return func
-
-
 @click.command(help="Train a model.")
-@shared_options
+@click.option(
+    "--config", type=click.Path(
+        exists=True, dir_okay=False, file_okay=True, readable=True, path_type=pathlib.Path
+    ),
+    required=True,
+    help="Path to the configuration file."
+)
+@click.option(
+    "--override", multiple=True,
+    type=click.STRING, required=False,
+    help="Override configuration values in dotlist format."
+)
+@click.option(
+    "--work-dir", type=click.Path(
+        dir_okay=True, file_okay=False, path_type=pathlib.Path
+    ),
+    required=False, default=pathlib.Path(__file__).parent / "experiments",
+    show_default=True,
+    help="Path to the working directory. The experiment subdirectory will be created here."
+)
+@click.option(
+    "--exp-name", type=click.STRING,
+    required=True,
+    help="Experiment name. Checkpoints will be saved in subdirectory with this name."
+)
+@click.option(
+    "--log-dir", type=click.Path(
+        dir_okay=True, file_okay=False, path_type=pathlib.Path
+    ),
+    required=False,
+    help="Directory to save logs. If not specified, logs will be saved in the checkpoints directory."
+)
+@click.option(
+    "--restart", is_flag=True, default=False,
+    help="Ignore existing checkpoints and start new training."
+)
+@click.option(
+    "--resume-from", type=click.Path(
+        exists=True, dir_okay=False, file_okay=True, readable=True, path_type=pathlib.Path
+    ),
+    required=False,
+    help="Resume training from this specific checkpoint."
+)
 def main(
         config: pathlib.Path, override: list[str],
         exp_name: str, work_dir: pathlib.Path,

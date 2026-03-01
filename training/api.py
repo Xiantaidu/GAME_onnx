@@ -8,9 +8,16 @@ import yaml
 from lightning_utilities.core.rank_zero import rank_zero_only
 
 from lib import logging
+from lib.config.core import ConfigBaseModel
 from lib.config.formatter import ModelFormatter
 from lib.config.io import load_raw_config
 from lib.config.schema import RootConfig, PeriodicCheckpointConfig, ExpressionCheckpointConfig
+
+__all__ = [
+    "load_config_for_training",
+    "find_latest_checkpoints",
+    "train_model",
+]
 
 
 @rank_zero_only
@@ -20,7 +27,11 @@ def _log_config(cfg: RootConfig):
     print(formatter.format(cfg.training))
 
 
-def load_config_for_training(config_path: pathlib.Path, scope: int = 0, overrides: list[str] = None) -> RootConfig:
+def load_config_for_training(
+        config_path: pathlib.Path,
+        scope: int = 0,
+        overrides: list[str] = None
+) -> RootConfig:
     config = load_raw_config(config_path, overrides)
     config = RootConfig.model_validate(config, scope=scope)
     config.resolve(scope_mask=scope)
@@ -72,13 +83,22 @@ def train_model(
     logging.info(f"Lightning module: {pl_module_cls.__name__}.", callback=rank_zero_info)
 
     @rank_zero_only
+    def _check_file_and_config(file: pathlib.Path, cfg: ConfigBaseModel):
+        cfg_load = load_raw_config(file)
+        if cfg_load != cfg.model_dump():
+            raise RuntimeError(
+                f"Contents of '{file}' do not match the configuration. "
+                f"If you edited the configuration file, please re-binarize the dataset."
+            )
+
+    @rank_zero_only
     def _check_and_copy(filename: str, from_dir: pathlib.Path, to_dir: pathlib.Path):
         source_file = from_dir / filename
         target_file = to_dir / filename
         if target_file.exists():
             with (
                 open(source_file, "r", encoding="utf8") as f1,
-                open(target_file, "r", encoding="utf8") as f2
+                open(target_file, "r", encoding="utf8") as f2,
             ):
                 json1 = json.load(f1)
                 json2 = json.load(f2)
@@ -102,6 +122,7 @@ def train_model(
 
     data_dir = config.binarizer.data_dir_resolved
     ckpt_save_dir.mkdir(parents=True, exist_ok=True)
+    _check_file_and_config(data_dir / "feature.yaml", config.binarizer.features)
     _check_and_copy("lang_map.json", data_dir, ckpt_save_dir)
     _config_dump(config, ckpt_save_dir)
     model_config = config.model

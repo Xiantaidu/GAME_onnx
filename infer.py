@@ -1,8 +1,19 @@
+import glob
 import pathlib
+from typing import Any
 
 import click
 
 from lib import logging
+from lib.config.schema import ValidationConfig
+
+_OPT_KEY_BATCH_SIZE = "batch_size"
+_OPT_KEY_NUM_WORKERS = "num_workers"
+_OPT_KEY_SEG_THRESHOLD = "seg_threshold"
+_OPT_KEY_SEG_RADIUS = "seg_radius"
+_OPT_KEY_SEG_D3PM_T0 = "t0"
+_OPT_KEY_SEG_D3PM_NSTEPS = "nsteps"
+_OPT_KEY_EST_THRESHOLD = "est_threshold"
 
 
 # noinspection PyUnusedLocal
@@ -46,6 +57,31 @@ def _validate_output_formats(ctx, param, value) -> set[str]:
         raise click.BadParameter(f"Invalid output formats: {e}")
 
 
+# noinspection PyUnusedLocal
+def _validate_path_or_glob(ctx, param, value) -> str:
+    try:
+        paths = []
+        for v in value:
+            if glob.has_magic(v):
+                paths.extend(glob.glob(v, recursive=True))
+            else:
+                paths.append(v)
+        if not paths:
+            raise FileNotFoundError(f"No files found for paths: {value}")
+        paths = [
+            pathlib.Path(p)
+            for p in paths
+        ]
+        for p in paths:
+            if not p.exists():
+                raise FileNotFoundError(f"Path does not exist: {p}")
+            if not p.is_file():
+                raise FileNotFoundError(f"Path is not a file: {p}")
+        return paths
+    except Exception as e:
+        raise click.BadParameter(f"Invalid path or glob: {e}")
+
+
 def _t0_nstep_to_ts(t0: float, nsteps: int) -> list[float]:
     if nsteps == 1:
         return [t0]
@@ -66,12 +102,12 @@ def _get_language_id(language: str, lang_map: dict[str, int]) -> int:
     return language_id
 
 
-def _parse_filemap(path: pathlib.Path, exts: set[str], glob: str | None) -> dict[str, pathlib.Path]:
+def _parse_filemap(path: pathlib.Path, exts: set[str], glb: str | None) -> dict[str, pathlib.Path]:
     if path.is_file():
         return {path.name: path}
     elif path.is_dir():
-        if glob:
-            files = [f for f in path.rglob(glob) if f.is_file()]
+        if glb:
+            files = [f for f in path.rglob(glb) if f.is_file()]
         else:
             files = [f for f in path.rglob("*") if f.is_file() and f.suffix.lower() in exts]
         filemap = {
@@ -90,7 +126,10 @@ def main():
     pass
 
 
-def shared_options(func):
+def shared_options(func=None, *, defaults: dict[str, Any] = None):
+    if defaults is None:
+        defaults = {}
+
     options = [
         click.option(
             "-m", "--model", type=click.Path(
@@ -104,31 +143,37 @@ def shared_options(func):
             help="Language code for better segmentation if supported."
         ),
         click.option(
-            "--batch-size", type=click.IntRange(min=1), default=4, show_default=True,
+            "--batch-size", type=click.IntRange(min=1), show_default=True,
+            default=defaults.get(_OPT_KEY_BATCH_SIZE, 4),
             help="Batch size for inference."
         ),
         click.option(
-            "--num-workers", type=click.IntRange(min=0), default=0, show_default=True,
+            "--num-workers", type=click.IntRange(min=0), show_default=True,
+            default=defaults.get(_OPT_KEY_NUM_WORKERS, 0),
             help="Number of worker processes for dataloader."
         ),
         click.option(
             "--seg-threshold", type=click.FloatRange(
                 min=0, min_open=False, max=1, max_open=True
-            ), default=0.2, show_default=True,
+            ), show_default=True,
+            default=defaults.get(_OPT_KEY_SEG_THRESHOLD, 0.2),
             help="Boundary decoding threshold for segmentation model."
         ),
         click.option(
-            "--seg-radius", type=click.FloatRange(min=0.01), default=0.02, show_default=True,
+            "--seg-radius", type=click.FloatRange(min=0.01), show_default=True,
+            default=defaults.get(_OPT_KEY_SEG_RADIUS, 0.02),
             help="Boundary decoding radius for segmentation model."
         ),
         click.option(
             "--t0", "--seg-d3pm-t0", type=click.FloatRange(
                 min=0, min_open=False, max=1, max_open=True
-            ), default=0.0, show_default=True,
-            help="Starting T value (t0) for segmentation model."
+            ), show_default=True,
+            default=defaults.get(_OPT_KEY_SEG_D3PM_T0, 0.0),
+            help="Starting T value (t0) of D3PM for segmentation model."
         ),
         click.option(
-            "--nsteps", "--seg-d3pm-nsteps", type=click.IntRange(min=1), default=8, show_default=True,
+            "--nsteps", "--seg-d3pm-nsteps", type=click.IntRange(min=1), show_default=True,
+            default=defaults.get(_OPT_KEY_SEG_D3PM_NSTEPS, 8),
             help="Number of D3PM sampling steps for segmentation model."
         ),
         click.option(
@@ -142,22 +187,36 @@ def shared_options(func):
         click.option(
             "--est-threshold", type=click.FloatRange(
                 min=0, min_open=False, max=1, max_open=True
-            ), default=0.2, show_default=True,
+            ), show_default=True,
+            default=defaults.get(_OPT_KEY_EST_THRESHOLD, 0.2),
             help="Presence detecting threshold for estimation model."
         ),
     ]
-    for option in reversed(options):
-        func = option(func)
-    return func
+
+    def decorator(f):
+        for option in reversed(options):
+            f = option(f)
+        return f
+
+    if func is None:
+        return decorator
+    else:
+        return decorator(func)
 
 
-@main.command(name="extract", help="Extract MIDI from single or multiple audio files.")
+@main.command(
+    name="extract",
+    help="Extract MIDI from single or multiple audio files."
+)
 @click.argument(
     "path", type=click.Path(
         exists=True, dir_okay=True, file_okay=True, readable=True, path_type=pathlib.Path
     ),
 )
-@shared_options
+@shared_options(defaults={
+    _OPT_KEY_SEG_D3PM_T0: 0.0,
+    _OPT_KEY_SEG_D3PM_NSTEPS: 8,
+})
 @click.option(
     "--input-formats", type=str, default="wav,flac,mp3,aac,ogg", show_default=True,
     callback=_validate_exts,
@@ -167,7 +226,7 @@ def shared_options(func):
     )
 )
 @click.option(
-    "--glob", type=str, default=None, show_default=False,
+    "--glob", "glb", type=str, default=None, show_default=False,
     help=(
             "Glob pattern to filter audio files (i.e. *.wav). "
             "Overrides --exts if provided. Ignored if a single audio file is provided."
@@ -222,7 +281,7 @@ def extract(
         ts: list[float],
         est_threshold: float,
         input_formats: set[str],
-        glob: str,
+        glb: str,
         output_formats: set[str],
         pitch_format: str,
         round_pitch: bool,
@@ -231,7 +290,7 @@ def extract(
 ):
     if ts is None:
         ts = _t0_nstep_to_ts(t0, nsteps)
-    filemap = _parse_filemap(path, input_formats, glob)
+    filemap = _parse_filemap(path, input_formats, glb)
     if output_dir is None:
         output_dir = path if path.is_dir() else path.parent
 
@@ -242,7 +301,7 @@ def extract(
     )
     from inference.slicer2 import Slicer
     from inference.data import SlicedAudioFileIterableDataset
-    from inference.callbacks import SaveMidiCallback, SaveTextCallback
+    from inference.callbacks import SaveCombinedMidiFileCallback, SaveCombinedTextFileCallback
 
     model, lang_map = load_inference_model(model)
     language_id = _get_language_id(language, lang_map)
@@ -258,34 +317,159 @@ def extract(
     )
     callbacks = []
     if "mid" in output_formats:
-        callbacks.append(SaveMidiCallback(
+        callbacks.append(SaveCombinedMidiFileCallback(
             output_dir=output_dir,
             tempo=tempo,
         ))
     if "txt" in output_formats:
-        callbacks.append(SaveTextCallback(
+        callbacks.append(SaveCombinedTextFileCallback(
             output_dir=output_dir,
             file_format="txt",
             pitch_format=pitch_format,
             round_pitch=round_pitch,
         ))
     if "csv" in output_formats:
-        callbacks.append(SaveTextCallback(
+        callbacks.append(SaveCombinedTextFileCallback(
             output_dir=output_dir,
             file_format="csv",
             pitch_format=pitch_format,
             round_pitch=round_pitch,
         ))
+    # noinspection PyArgumentList
     infer_model(
         model=model,
         dataset=dataset,
+        config=ValidationConfig(
+            d3pm_sample_ts=ts,
+            boundary_decoding_threshold=seg_threshold,
+            boundary_decoding_radius=round(seg_radius / model.timestep),
+            note_presence_threshold=est_threshold,
+        ),
         batch_size=batch_size,
         num_workers=num_workers,
         callbacks=callbacks,
-        segmentation_threshold=seg_threshold,
-        segmentation_radius=seg_radius,
-        segmentation_d3pm_ts=ts,
-        estimation_threshold=est_threshold,
+    )
+    logging.success("Inference completed.", callback=rank_zero_info)
+
+
+@main.command(
+    name="align",
+    help="Generate aligned note labels with word boundaries in DiffSinger transcriptions."
+)
+@click.argument(
+    "paths", type=str, nargs=-1, metavar="PATH_OR_GLOB",
+    callback=_validate_path_or_glob,
+)
+@shared_options(defaults={
+    _OPT_KEY_SEG_D3PM_T0: 0.5,
+    _OPT_KEY_SEG_D3PM_NSTEPS: 4,
+})
+@click.option(
+    "--save-path", type=click.Path(
+        file_okay=True, dir_okay=False, writable=True, path_type=pathlib.Path
+    ),
+    help=(
+        "Path of the output file to save the updated transcriptions. "
+        "Ignored if multiple input files are provided. Overrides --save-name if provided."
+    )
+)
+@click.option(
+    "--save-name", type=str, default=None, show_default=False,
+    help=(
+            "Name of the updated transcription files to save. "
+            "Ignored if input is a single file and --save-path is provided. "
+            "If both --save-path and --save-name are not provided, the original files will be overwritten."
+    )
+)
+@click.option(
+    "--overwrite", is_flag=True, default=False, show_default=True,
+    help=(
+        "Whether to overwrite existing files when saving updated transcriptions."
+    )
+)
+@click.option(
+    "--no-wb", is_flag=True, default=False, show_default=True,
+    help=(
+            "Whether to disable word boundaries for better alignment. "
+            "If set, \'ph_num\' field will not be checked and used. Not recommended."
+    )
+)
+def align(
+        paths: list[pathlib.Path],
+        model: pathlib.Path,
+        language: str,
+        batch_size: int,
+        num_workers: int,
+        seg_threshold: float,
+        seg_radius: float,
+        t0: float,
+        nsteps: int,
+        ts: list[float],
+        est_threshold: float,
+        save_path: pathlib.Path,
+        save_name: str,
+        overwrite: bool,
+        no_wb: bool,
+):
+    if ts is None:
+        ts = _t0_nstep_to_ts(t0, nsteps)
+    if len(paths) > 1:
+        save_path = None
+    if save_path is not None:
+        save_name = save_path.name
+    inplace = (save_path is None) and (save_name is None)
+    if inplace and not overwrite:
+        raise ValueError("In-place saving requires --overwrite flag to be set.")
+    if not overwrite:
+        for p in paths:
+            if save_path is not None and save_path.exists():
+                raise FileExistsError(f"Output file already exists: {save_path}")
+            if save_name is not None:
+                output_file = p.parent / save_name
+                if output_file.exists():
+                    raise FileExistsError(f"Output file already exists: {output_file}")
+    save_dir = save_path.parent if save_path else None
+    use_wb = not no_wb
+
+    from lightning_utilities.core.rank_zero import rank_zero_info
+    from inference.api import (
+        load_inference_model,
+        infer_model,
+    )
+    from inference.data import DiffSingerTranscriptionsDataset
+    from inference.callbacks import UpdateDiffSingerTranscriptionsCallback
+
+    model, lang_map = load_inference_model(model)
+    language_id = _get_language_id(language, lang_map)
+
+    sr = model.inference_config.features.audio_sample_rate
+    dataset = DiffSingerTranscriptionsDataset(
+        filelist=paths,
+        samplerate=sr,
+        language=language_id,
+        use_wb=use_wb,
+    )
+    callbacks = [
+        UpdateDiffSingerTranscriptionsCallback(
+            filelist=paths,
+            overwrite=inplace,
+            save_dir=save_dir,
+            save_filename=save_name,
+        )
+    ]
+    # noinspection PyArgumentList
+    infer_model(
+        model=model,
+        dataset=dataset,
+        config=ValidationConfig(
+            d3pm_sample_ts=ts,
+            boundary_decoding_threshold=seg_threshold,
+            boundary_decoding_radius=round(seg_radius / model.timestep),
+            note_presence_threshold=est_threshold,
+        ),
+        batch_size=batch_size,
+        num_workers=num_workers,
+        callbacks=callbacks,
     )
     logging.success("Inference completed.", callback=rank_zero_info)
 
