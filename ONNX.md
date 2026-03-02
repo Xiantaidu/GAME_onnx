@@ -30,7 +30,7 @@ A `config.json` carries the information needed for ONNX model inference. Structu
 | segmenter.onnx | The segmenter module. Predicts note boundaries. Supports D3PM sampling loops. |
 | estimator.onnx | The estimator module. Estimate note pitches from given boundaries.            |
 | dur2bd.onnx    | Function to convert durations in seconds to boundaries in frames.             |
-| bd2dur.onnx    | Function to convert boundaries in frame to durations in seconds.              |
+| bd2dur.onnx    | Function to convert boundaries in frames to durations in seconds.             |
 
 ## Dimensions
 
