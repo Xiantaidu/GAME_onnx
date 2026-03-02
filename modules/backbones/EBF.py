@@ -5,6 +5,7 @@ from einops import rearrange
 from torch import nn
 import torch.nn.functional as F
 
+from deployment.context import is_export_mode
 from modules.backbones.RoPosEmb_s2 import SingleRoPosEmb
 from modules.backbones.eglu import HalfCacheGLUFFN
 
@@ -324,6 +325,13 @@ class EBFBackbone(nn.Module):
             use_out_norm: bool = True,
     ):
         super().__init__()
+        if is_export_mode():
+            rope_cache=False
+        else:
+            pass
+
+
+
         self.use_out_norm = use_out_norm
         self.return_latent = return_latent
         if return_latent:
@@ -402,6 +410,10 @@ class GeneratorEBFBackbone(nn.Module):
             use_out_norm: bool = True,
     ):
         super().__init__()
+        if is_export_mode():
+            rope_cache=False
+        else:
+            pass
         self.use_out_norm = use_out_norm
         self.return_latent = return_latent
         if return_latent:
