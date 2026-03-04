@@ -1,7 +1,5 @@
 import torch
 import torch.nn as nn
-import math
-import torch.nn.functional as F
 
 
 def compute_inv_freq(dim: int, theta: float = 10000.0):
@@ -20,12 +18,11 @@ def compute_freqs_cis_dynamic(x: torch.Tensor, inv_freq: torch.Tensor):
     return torch.cos(freqs), torch.sin(freqs)
 
 
-
 def single_apply_rotary_emb(
         x: torch.Tensor,
         freqs_cos: torch.Tensor,
         freqs_sin: torch.Tensor,
-) :
+):
     """ONNX兼容：手动实现复数乘法"""
     x_ = x.float().reshape(*x.shape[:-1], -1, 2).contiguous()
 
@@ -41,20 +38,21 @@ def single_apply_rotary_emb(
 
     return x_out.type_as(x)
 
+
 class SingleRoPosEmb(nn.Module):
-    def __init__(self, dim:int, max_len=5000, theta=10000.0, use_cache=True):
+    def __init__(self, dim: int, max_len=5000, theta=10000.0, use_cache=True):
         super().__init__()
         self.dim = dim
         self.theta = theta
         self.use_cache = use_cache
         # inv_freq是固定的，可以预计算
-        self.register_buffer('inv_freq', compute_inv_freq(dim, theta),persistent=False)
+        self.register_buffer('inv_freq', compute_inv_freq(dim, theta), persistent=False)
         # 缓存模式下预计算pe
         if use_cache:
             pe_cos, pe_sin = compute_freqs_cis_dynamic(
                 torch.zeros(1, max_len, dim), self.inv_freq)
-            self.register_buffer('pe_cos', pe_cos[None, :, :],persistent=False)
-            self.register_buffer('pe_sin', pe_sin[None, :, :],persistent=False)
+            self.register_buffer('pe_cos', pe_cos[None, :, :], persistent=False)
+            self.register_buffer('pe_sin', pe_sin[None, :, :], persistent=False)
 
     def extend_pe(self, x):
         """Reset the positional encodings (only for use_cache=True mode)."""
@@ -69,8 +67,8 @@ class SingleRoPosEmb(nn.Module):
         ndim = x.ndim
         seq_len = x.shape[-2]
         pe_cos, pe_sin = compute_freqs_cis_dynamic(x, self.inv_freq)
-        pe_cos = pe_cos.view(*((1,)*(ndim-2)), seq_len, self.dim//2)
-        pe_sin = pe_sin.view(*((1,)*(ndim-2)), seq_len, self.dim//2)
+        pe_cos = pe_cos.view(*((1,) * (ndim - 2)), seq_len, self.dim // 2)
+        pe_sin = pe_sin.view(*((1,) * (ndim - 2)), seq_len, self.dim // 2)
         return pe_cos, pe_sin
 
     def get_pe_cached(self, x):
@@ -79,8 +77,8 @@ class SingleRoPosEmb(nn.Module):
         seq_len = x.size(-2)
         pe_cos = self.pe_cos[:, :seq_len]
         pe_sin = self.pe_sin[:, :seq_len]
-        pe_cos = pe_cos.view(*((1,)*(ndim-2)), seq_len, self.dim//2)
-        pe_sin = pe_sin.view(*((1,)*(ndim-2)), seq_len, self.dim//2)
+        pe_cos = pe_cos.view(*((1,) * (ndim - 2)), seq_len, self.dim // 2)
+        pe_sin = pe_sin.view(*((1,) * (ndim - 2)), seq_len, self.dim // 2)
         return pe_cos, pe_sin
 
     def forward(self, x):

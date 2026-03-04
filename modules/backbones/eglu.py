@@ -1,14 +1,12 @@
-
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Tuple
 from enum import Enum
 
-
 try:
     from torch.amp import custom_fwd as _custom_fwd, custom_bwd as _custom_bwd
+
     custom_fwd = _custom_fwd(device_type="cuda")
     custom_bwd = _custom_bwd(device_type="cuda")
 except TypeError:
@@ -21,8 +19,6 @@ class GateType(Enum):
     SILU = "silu"
     SIGMOID = "sigmoid"
     GELU = "gelu"
-
-
 
 
 class _HalfCacheGLUFunction(torch.autograd.Function):
@@ -41,25 +37,25 @@ class _HalfCacheGLUFunction(torch.autograd.Function):
     @staticmethod
     @custom_fwd
     def forward(
-        ctx,
-        x: torch.Tensor,
-        W_gate: torch.Tensor,
-        W_up: torch.Tensor,
-        W_down: torch.Tensor,
-        gate_type: str = "silu",
-        eps: float = 1e-6,
-        quant_bits: int = 8,
-        bias_gate: Optional[torch.Tensor] = None,
-        bias_up: Optional[torch.Tensor] = None,
-        bias_down: Optional[torch.Tensor] = None,
+            ctx,
+            x: torch.Tensor,
+            W_gate: torch.Tensor,
+            W_up: torch.Tensor,
+            W_down: torch.Tensor,
+            gate_type: str = "silu",
+            eps: float = 1e-6,
+            quant_bits: int = 8,
+            bias_gate: Optional[torch.Tensor] = None,
+            bias_up: Optional[torch.Tensor] = None,
+            bias_down: Optional[torch.Tensor] = None,
     ):
         # 分步计算，每步完成后立即释放不需要的中间张量
-        gate = F.linear(x, W_gate, bias_gate)       # [B, S, D_ff] bf16
+        gate = F.linear(x, W_gate, bias_gate)  # [B, S, D_ff] bf16
 
         # 计算 up，然后立即与 gate_act 合并成 hidden
-        up = F.linear(x, W_up, bias_up)             # [B, S, D_ff] bf16
-        gate_act = _gate_fn(gate, gate_type)         # [B, S, D_ff] bf16
-        hidden = gate_act * up                       # [B, S, D_ff] bf16
+        up = F.linear(x, W_up, bias_up)  # [B, S, D_ff] bf16
+        gate_act = _gate_fn(gate, gate_type)  # [B, S, D_ff] bf16
+        hidden = gate_act * up  # [B, S, D_ff] bf16
 
         # gate_act 和 up 不再需要，立即释放
         del gate_act, up
@@ -72,7 +68,7 @@ class _HalfCacheGLUFunction(torch.autograd.Function):
             hidden_scale = None
 
         # 计算输出
-        out = F.linear(hidden, W_down, bias_down)    # [B, S, D] bf16
+        out = F.linear(hidden, W_down, bias_down)  # [B, S, D] bf16
 
         # hidden(bf16) 不再需要，只保留 hidden_q(int8)
         del hidden
@@ -153,8 +149,6 @@ class _HalfCacheGLUFunction(torch.autograd.Function):
                 grad_bias_gate, grad_bias_up, grad_bias_down)
 
 
-
-
 def _gate_fn(gate: torch.Tensor, gate_type: str) -> torch.Tensor:
     if gate_type == "silu":
         return F.silu(gate)
@@ -167,9 +161,9 @@ def _gate_fn(gate: torch.Tensor, gate_type: str) -> torch.Tensor:
 
 
 def _gate_fn_backward(
-    gate: torch.Tensor,
-    gate_act: torch.Tensor,
-    gate_type: str,
+        gate: torch.Tensor,
+        gate_act: torch.Tensor,
+        gate_type: str,
 ) -> torch.Tensor:
     if gate_type == "silu":
         sig = torch.sigmoid(gate)
@@ -186,9 +180,9 @@ def _gate_fn_backward(
 
 
 def _safe_div_recover(
-    hidden: torch.Tensor,
-    gate_act: torch.Tensor,
-    eps: float,
+        hidden: torch.Tensor,
+        gate_act: torch.Tensor,
+        eps: float,
 ) -> torch.Tensor:
     sign = gate_act.sign()
     sign[sign == 0] = 1.0
@@ -197,7 +191,7 @@ def _safe_div_recover(
 
 
 def _quantize_int8(
-    tensor: torch.Tensor,
+        tensor: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     shape = tensor.shape
     flat = tensor.reshape(-1, shape[-1])
@@ -208,24 +202,24 @@ def _quantize_int8(
 
 
 def _dequantize_int8(
-    quantized: torch.Tensor,
-    scale: torch.Tensor,
-    dtype: torch.dtype,
+        quantized: torch.Tensor,
+        scale: torch.Tensor,
+        dtype: torch.dtype,
 ) -> torch.Tensor:
     return quantized.to(dtype) * scale.to(dtype)
 
 
 class HalfCacheGLUFFN(nn.Module):
     def __init__(
-        self,
-        d_model: int,
-        d_ff: int,
-        gate_type: str = "silu",
-        bias: bool = False,
-        eps: float = 1e-6,
-        quant_bits: int = 8,
-        device: Optional[torch.device] = None,
-        dtype: Optional[torch.dtype] = None,
+            self,
+            d_model: int,
+            d_ff: int,
+            gate_type: str = "silu",
+            bias: bool = False,
+            eps: float = 1e-6,
+            quant_bits: int = 8,
+            device: Optional[torch.device] = None,
+            dtype: Optional[torch.dtype] = None,
     ):
         super().__init__()
         factory = {"device": device, "dtype": dtype}
@@ -237,12 +231,12 @@ class HalfCacheGLUFFN(nn.Module):
         self.quant_bits = quant_bits
 
         self.W_gate = nn.Parameter(torch.empty(d_ff, d_model, **factory))
-        self.W_up   = nn.Parameter(torch.empty(d_ff, d_model, **factory))
+        self.W_up = nn.Parameter(torch.empty(d_ff, d_model, **factory))
         self.W_down = nn.Parameter(torch.empty(d_model, d_ff, **factory))
 
         if bias:
             self.bias_gate = nn.Parameter(torch.zeros(d_ff, **factory))
-            self.bias_up   = nn.Parameter(torch.zeros(d_ff, **factory))
+            self.bias_up = nn.Parameter(torch.zeros(d_ff, **factory))
             self.bias_down = nn.Parameter(torch.zeros(d_model, **factory))
         else:
             self.register_parameter("bias_gate", None)
@@ -266,7 +260,7 @@ class HalfCacheGLUFFN(nn.Module):
             )
         else:
             gate = F.linear(x, self.W_gate, self.bias_gate)
-            up   = F.linear(x, self.W_up, self.bias_up)
+            up = F.linear(x, self.W_up, self.bias_up)
             hidden = _gate_fn(gate, self.gate_type) * up
             return F.linear(hidden, self.W_down, self.bias_down)
 
@@ -274,5 +268,3 @@ class HalfCacheGLUFFN(nn.Module):
         return (f"d_model={self.d_model}, d_ff={self.d_ff}, "
                 f"gate_type={self.gate_type}, quant_bits={self.quant_bits}, "
                 f"bias={self.bias_gate is not None}")
-
-

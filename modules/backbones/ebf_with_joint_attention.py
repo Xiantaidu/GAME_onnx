@@ -362,7 +362,7 @@ def build_split_attention_masks(regions, region_token_num, t_mask, n_mask, regio
 
     def _build_cross_bias(q_region, k_region, q_valid, k_valid):
         pad_mask = q_valid.unsqueeze(-1) & k_valid.unsqueeze(-2)
-        
+
         if region_bias is not None:
             # Soft mask: region bias decay (different regions get negative bias)
             pad_bias = torch.where(pad_mask, 0.0, -10000.0).unsqueeze(1)
@@ -445,7 +445,7 @@ class SplitJointAttention(nn.Module):
 
         self.pool_norm = RMSnorm(dim)
         self.x_norm = RMSnorm(dim)
-        
+
         # Learnable merge for same-stream + cross-stream outputs
         self.pool_merge = nn.Linear(attn_dim * 2, dim, bias=True)
         self.x_merge = nn.Linear(attn_dim * 2, dim, bias=True)
@@ -533,7 +533,6 @@ class SplitJointAttention(nn.Module):
         # # --- 4. x -> pool (cross-stream, NO RoPE, use mask only) ---
         # xp_out = F.scaled_dot_product_attention(x_q, pool_k, pool_v, attn_mask=xp_mask, dropout_p=dp)
 
-
         # --- 3. pool -> x (cross-stream, NO RoPE, use mask only) ---
         px_out = F.scaled_dot_product_attention(pool_q_r, x_k_r, x_v, attn_mask=px_mask, dropout_p=dp)
 
@@ -545,7 +544,7 @@ class SplitJointAttention(nn.Module):
         px_flat = rearrange(px_out, 'b h t d -> b t (h d)')
         xx_flat = rearrange(xx_out, 'b h t d -> b t (h d)')
         xp_flat = rearrange(xp_out, 'b h t d -> b t (h d)')
-        
+
         pool_attn = self.pool_merge(torch.cat([pp_flat, px_flat], dim=-1))
         x_attn = self.x_merge(torch.cat([xx_flat, xp_flat], dim=-1))
 
@@ -591,19 +590,20 @@ class PJAC(nn.Module):
         super().__init__()
         self.attn_type = attn_type
         if attn_type == 'joint':
-            self.jattn = JointAttention(dim=dim, num_heads=num_heads, region_token_num=region_token_num, qk_norm=qk_norm,
-                                      use_rope=use_rope, rope_mode=rope_mode, use_pool_offset=use_pool_offset,
-                                      theta=theta,
-                                      dropout_attn=dropout_attn, out_drop_x=attn_out_drop_x,
-                                      out_drop_pool=attn_out_drop_pool, head_dim=head_dim)
+            self.jattn = JointAttention(dim=dim, num_heads=num_heads, region_token_num=region_token_num,
+                                        qk_norm=qk_norm,
+                                        use_rope=use_rope, rope_mode=rope_mode, use_pool_offset=use_pool_offset,
+                                        theta=theta,
+                                        dropout_attn=dropout_attn, out_drop_x=attn_out_drop_x,
+                                        out_drop_pool=attn_out_drop_pool, head_dim=head_dim)
         elif attn_type == 'split':
             self.jattn = SplitJointAttention(dim=dim, num_heads=num_heads, region_token_num=region_token_num,
-                                           qk_norm=qk_norm,
-                                           use_rope=use_rope, rope_mode=rope_mode, use_pool_offset=use_pool_offset,
-                                           theta=theta,
-                                           dropout_attn=dropout_attn, out_drop_x=attn_out_drop_x,
-                                           out_drop_pool=attn_out_drop_pool, head_dim=head_dim,
-                                           )
+                                             qk_norm=qk_norm,
+                                             use_rope=use_rope, rope_mode=rope_mode, use_pool_offset=use_pool_offset,
+                                             theta=theta,
+                                             dropout_attn=dropout_attn, out_drop_x=attn_out_drop_x,
+                                             out_drop_pool=attn_out_drop_pool, head_dim=head_dim,
+                                             )
         else:
             raise ValueError(f"Unknown attn_type: {attn_type}")
 
