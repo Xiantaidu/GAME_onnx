@@ -54,7 +54,14 @@ training:
         unit: "step"
         every_n_units: 2000
         since_m_units: 0
-        save_last_k: 2
+        save_last_k: 1
+        weights_only: false
+      - tag: "backup"
+        type: "periodic"
+        unit: "step"
+        every_n_units: 10000
+        since_m_units: 30000
+        save_last_k: -1
         weights_only: false
     precision: "bf16-mixed"
     accelerator: "auto"
