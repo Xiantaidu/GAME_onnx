@@ -134,7 +134,7 @@ binarizer:
 training:
   augmentation:
     natural_noise:
-      enabled: true  # <-- false if you don't use natual noise
+      enabled: true  # <-- false if you don't use natural noise
       noise_path_glob: "data/noise/**/*.wav"  # <-- natural noise datasets
     rir_reverb:
       enabled: true  # <-- false if you don't use reverb
