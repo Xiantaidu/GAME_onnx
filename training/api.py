@@ -4,13 +4,12 @@ import pathlib
 import re
 import shutil
 
-import yaml
 from lightning_utilities.core.rank_zero import rank_zero_only
 
 from lib import logging
 from lib.config.core import ConfigBaseModel
 from lib.config.formatter import ModelFormatter
-from lib.config.io import load_raw_config
+from lib.config.io import load_raw_config, save_raw_config
 from lib.config.schema import RootConfig, PeriodicCheckpointConfig, ExpressionCheckpointConfig
 
 __all__ = [
@@ -113,12 +112,10 @@ def train_model(
     @rank_zero_only
     def _config_dump(cfg: RootConfig, to_dir: pathlib.Path):
         # config for inference and exporting
-        with open(to_dir / "config.yaml", "w", encoding="utf8") as f:
-            yaml.safe_dump(cfg.model_dump(include={"model", "inference"}), f, allow_unicode=True, sort_keys=False)
+        save_raw_config(cfg.model_dump(include={"model", "inference"}), to_dir / "config.yaml")
         # config for debugging, add timestamp to avoid overwriting
         current_time = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        with open(to_dir / f"hparams-{current_time}.yaml", "w", encoding="utf8") as f:
-            yaml.safe_dump(cfg.model_dump(), f, allow_unicode=True, sort_keys=False)
+        save_raw_config(cfg.model_dump(), to_dir / f"hparams-{current_time}.yaml")
 
     data_dir = config.binarizer.data_dir_resolved
     ckpt_save_dir.mkdir(parents=True, exist_ok=True)
