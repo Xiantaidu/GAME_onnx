@@ -63,6 +63,7 @@ def extract_midi(
     output_txt,
     output_csv,
     tempo,
+    quantize_option,
     pitch_format,
     round_pitch
 ):
@@ -112,11 +113,25 @@ def extract_midi(
             language=language_id,
         )
 
+        # Parse quantization
+        quantization_step = 0
+        if "1/4 音符" in quantize_option:
+            quantization_step = 480
+        elif "1/8 音符" in quantize_option:
+            quantization_step = 240
+        elif "1/16 音符" in quantize_option:
+            quantization_step = 120
+        elif "1/32 音符" in quantize_option:
+            quantization_step = 60
+        elif "1/64 音符" in quantize_option:
+            quantization_step = 30
+
         callbacks = []
         if "mid" in output_formats:
             callbacks.append(SaveCombinedMidiFileCallback(
                 output_dir=output_dir,
                 tempo=tempo,
+                quantization_step=quantization_step,
             ))
         if "txt" in output_formats:
             callbacks.append(SaveCombinedTextFileCallback(
@@ -293,6 +308,12 @@ with gr.Blocks(title="GAME: 生成式自适应 MIDI 提取器") as demo:
                             out_csv_cb = gr.Checkbox(label="CSV (.csv)", value=False)
                         
                         tempo_number = gr.Number(label="曲速 (Tempo BPM)", value=120)
+                        quantize_dropdown = gr.Dropdown(
+                            choices=["不量化", "1/4 音符 (1拍)", "1/8 音符 (1/2拍)", "1/16 音符 (1/4拍) [推荐]", "1/32 音符 (1/8拍) [推荐]", "1/64 音符 (1/16拍)"],
+                            value="1/32 音符 (1/8拍) [推荐]",
+                            label="MIDI 量化 (Quantization)",
+                            info="Vocaloid/SV/UTAU 建议选 1/32 或 1/16 音符。过大会吞字，过小会很碎。"
+                        )
                         pitch_format_radio = gr.Radio(choices=["name", "number"], value="name", label="音高格式 (用于 Text/CSV)")
                         round_pitch_cb = gr.Checkbox(label="音高取整 (Round Pitch)", value=False)
                         
@@ -307,7 +328,7 @@ with gr.Blocks(title="GAME: 生成式自适应 MIDI 提取器") as demo:
                 inputs=[
                     audio_input, model_path_input, language_input,
                     seg_threshold_slider, seg_radius_slider, t0_slider, nsteps_slider, est_threshold_slider,
-                    out_mid_cb, out_txt_cb, out_csv_cb, tempo_number, pitch_format_radio, round_pitch_cb
+                    out_mid_cb, out_txt_cb, out_csv_cb, tempo_number, quantize_dropdown, pitch_format_radio, round_pitch_cb
                 ],
                 outputs=[extract_output_file, extract_msg]
             )

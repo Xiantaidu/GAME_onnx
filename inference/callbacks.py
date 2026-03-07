@@ -117,9 +117,11 @@ class SaveCombinedMidiFileCallback(SaveCombinedFileCallback):
     def __init__(
             self, output_dir: str | pathlib.Path,
             tempo: int = 120,
+            quantization_step: int = 0,
     ):
         super().__init__(output_dir)
         self.tempo = tempo
+        self.quantization_step = quantization_step
 
     def flush(self, key: str, notes: list[_NoteInfo], logger_fn: Callable) -> None:
         track = mido.MidiTrack()
@@ -128,6 +130,14 @@ class SaveCombinedMidiFileCallback(SaveCombinedFileCallback):
         for note in notes:
             onset_ticks = round(note.onset * self.tempo * 8)
             offset_ticks = round(note.offset * self.tempo * 8)
+            
+            if self.quantization_step > 0:
+                onset_ticks = round(onset_ticks / self.quantization_step) * self.quantization_step
+                offset_ticks = round(offset_ticks / self.quantization_step) * self.quantization_step
+                # 如果量化后长度为 0，则强制最少为一个量化步长
+                if offset_ticks <= onset_ticks:
+                    offset_ticks = onset_ticks + self.quantization_step
+
             midi_pitch = round(note.pitch)
             if offset_ticks <= onset_ticks:
                 continue
