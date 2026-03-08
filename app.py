@@ -8,6 +8,7 @@ import shutil
 
 from lib.config.schema import ValidationConfig
 from inference.api import load_inference_model, infer_model
+from inference.onnx_api import load_onnx_model, infer_from_files, align_with_transcriptions
 from inference.slicer2 import Slicer
 from inference.data import SlicedAudioFileIterableDataset, DiffSingerTranscriptionsDataset
 from inference.callbacks import (
@@ -39,21 +40,36 @@ def _t0_nstep_to_ts(t0: float, nsteps: int) -> list[float]:
 loaded_model = None
 loaded_model_path = None
 loaded_lang_map = None
+loaded_engine = None
+loaded_device = None
 
-def load_model_if_needed(model_path_str: str):
-    global loaded_model, loaded_model_path, loaded_lang_map
-    if model_path_str != loaded_model_path:
+def load_model_if_needed(model_path_str: str, engine: str, onnx_device: str):
+    global loaded_model, loaded_model_path, loaded_lang_map, loaded_engine, loaded_device
+    if (model_path_str != loaded_model_path) or (engine != loaded_engine) or (engine == "ONNX" and onnx_device != loaded_device):
         model_path = pathlib.Path(model_path_str)
         if not model_path.exists():
             raise FileNotFoundError(f"模型路径不存在: {model_path}")
-        loaded_model, loaded_lang_map = load_inference_model(model_path)
+            
+        if engine == "PyTorch":
+            loaded_model, loaded_lang_map = load_inference_model(model_path)
+        elif engine == "ONNX":
+            loaded_model = load_onnx_model(model_path, device=onnx_device)
+            loaded_lang_map = loaded_model.languages
+        else:
+            raise ValueError(f"不支持的引擎: {engine}")
+            
         loaded_model_path = model_path_str
+        loaded_engine = engine
+        loaded_device = onnx_device
     return loaded_model, loaded_lang_map
 
 def extract_midi(
     audio_files,
     model_path_str,
+    engine,
+    onnx_device,
     language,
+    batch_size,
     seg_threshold,
     seg_radius,
     t0,
@@ -96,74 +112,91 @@ def extract_midi(
             filemap[filename] = original_path
 
         # Load model
-        model, lang_map = load_model_if_needed(model_path_str)
+        model, lang_map = load_model_if_needed(model_path_str, engine, onnx_device)
         language_id = _get_language_id(language, lang_map)
 
-        sr = model.inference_config.features.audio_sample_rate
-        dataset = SlicedAudioFileIterableDataset(
-            filemap=filemap,
-            samplerate=sr,
-            slicer=Slicer(
-                sr=sr,
-                threshold=-40.,
-                min_length=1000,
-                min_interval=200,
-                max_sil_kept=100,
-            ),
-            language=language_id,
-        )
-
-        # Parse quantization
-        quantization_step = 0
-        if "1/4 音符" in quantize_option:
-            quantization_step = 480
-        elif "1/8 音符" in quantize_option:
-            quantization_step = 240
-        elif "1/16 音符" in quantize_option:
-            quantization_step = 120
-        elif "1/32 音符" in quantize_option:
-            quantization_step = 60
-        elif "1/64 音符" in quantize_option:
-            quantization_step = 30
-
-        callbacks = []
-        if "mid" in output_formats:
-            callbacks.append(SaveCombinedMidiFileCallback(
-                output_dir=output_dir,
-                tempo=tempo,
-                quantization_step=quantization_step,
-            ))
-        if "txt" in output_formats:
-            callbacks.append(SaveCombinedTextFileCallback(
-                output_dir=output_dir,
-                file_format="txt",
-                pitch_format=pitch_format,
-                round_pitch=round_pitch,
-            ))
-        if "csv" in output_formats:
-            callbacks.append(SaveCombinedTextFileCallback(
-                output_dir=output_dir,
-                file_format="csv",
-                pitch_format=pitch_format,
-                round_pitch=round_pitch,
-            ))
-
         ts = _t0_nstep_to_ts(t0, int(nsteps))
-        
-        # Run inference
-        infer_model(
-            model=model,
-            dataset=dataset,
-            config=ValidationConfig(
-                d3pm_sample_ts=ts,
-                boundary_decoding_threshold=seg_threshold,
-                boundary_decoding_radius=round(seg_radius / model.timestep),
-                note_presence_threshold=est_threshold,
-            ),
-            batch_size=4,
-            num_workers=0,
-            callbacks=callbacks,
-        )
+
+        if engine == "PyTorch":
+            sr = model.inference_config.features.audio_sample_rate
+            dataset = SlicedAudioFileIterableDataset(
+                filemap=filemap,
+                samplerate=sr,
+                slicer=Slicer(
+                    sr=sr,
+                    threshold=-40.,
+                    min_length=1000,
+                    min_interval=200,
+                    max_sil_kept=100,
+                ),
+                language=language_id,
+            )
+
+            # Parse quantization
+            quantization_step = 0
+            if "1/4 音符" in quantize_option:
+                quantization_step = 480
+            elif "1/8 音符" in quantize_option:
+                quantization_step = 240
+            elif "1/16 音符" in quantize_option:
+                quantization_step = 120
+            elif "1/32 音符" in quantize_option:
+                quantization_step = 60
+            elif "1/64 音符" in quantize_option:
+                quantization_step = 30
+
+            callbacks = []
+            if "mid" in output_formats:
+                callbacks.append(SaveCombinedMidiFileCallback(
+                    output_dir=output_dir,
+                    tempo=tempo,
+                    quantization_step=quantization_step,
+                ))
+            if "txt" in output_formats:
+                callbacks.append(SaveCombinedTextFileCallback(
+                    output_dir=output_dir,
+                    file_format="txt",
+                    pitch_format=pitch_format,
+                    round_pitch=round_pitch,
+                ))
+            if "csv" in output_formats:
+                callbacks.append(SaveCombinedTextFileCallback(
+                    output_dir=output_dir,
+                    file_format="csv",
+                    pitch_format=pitch_format,
+                    round_pitch=round_pitch,
+                ))
+
+            # Run inference
+            infer_model(
+                model=model,
+                dataset=dataset,
+                config=ValidationConfig(
+                    d3pm_sample_ts=ts,
+                    boundary_decoding_threshold=seg_threshold,
+                    boundary_decoding_radius=round(seg_radius / model.timestep),
+                    note_presence_threshold=est_threshold,
+                ),
+                batch_size=int(batch_size),
+                num_workers=0,
+                callbacks=callbacks,
+            )
+        elif engine == "ONNX":
+            infer_from_files(
+                model=model,
+                filemap=filemap,
+                output_dir=output_dir,
+                output_formats=output_formats,
+                language_id=language_id,
+                seg_threshold=seg_threshold,
+                seg_radius=seg_radius,
+                ts=ts,
+                est_threshold=est_threshold,
+                pitch_format=pitch_format,
+                round_pitch=round_pitch,
+                tempo=tempo,
+                batch_size=int(batch_size),
+            )
 
         # Collect output files
         generated_files = list(output_dir.glob("*"))
@@ -185,7 +218,10 @@ def extract_midi(
 def align_transcriptions(
     csv_files,
     model_path_str,
+    engine,
+    onnx_device,
     language,
+    batch_size,
     seg_threshold,
     seg_radius,
     t0,
@@ -216,42 +252,58 @@ def align_transcriptions(
             paths.append(dest_path)
 
         # Load model
-        model, lang_map = load_model_if_needed(model_path_str)
+        model, lang_map = load_model_if_needed(model_path_str, engine, onnx_device)
         language_id = _get_language_id(language, lang_map)
-
-        sr = model.inference_config.features.audio_sample_rate
-        dataset = DiffSingerTranscriptionsDataset(
-            filelist=paths,
-            samplerate=sr,
-            language=language_id,
-            use_wb=not no_wb,
-        )
-        
-        callbacks = [
-            UpdateDiffSingerTranscriptionsCallback(
-                filelist=paths,
-                overwrite=True, # Overwrite the copied files in our temp dir
-                save_dir=None,
-                save_filename=None,
-            )
-        ]
 
         ts = _t0_nstep_to_ts(t0, int(nsteps))
         
-        # Run inference
-        infer_model(
-            model=model,
-            dataset=dataset,
-            config=ValidationConfig(
-                d3pm_sample_ts=ts,
-                boundary_decoding_threshold=seg_threshold,
-                boundary_decoding_radius=round(seg_radius / model.timestep),
-                note_presence_threshold=est_threshold,
-            ),
-            batch_size=4,
-            num_workers=0,
-            callbacks=callbacks,
-        )
+        if engine == "PyTorch":
+            sr = model.inference_config.features.audio_sample_rate
+            dataset = DiffSingerTranscriptionsDataset(
+                filelist=paths,
+                samplerate=sr,
+                language=language_id,
+                use_wb=not no_wb,
+            )
+            
+            callbacks = [
+                UpdateDiffSingerTranscriptionsCallback(
+                    filelist=paths,
+                    overwrite=True, # Overwrite the copied files in our temp dir
+                    save_dir=None,
+                    save_filename=None,
+                )
+            ]
+
+            # Run inference
+            infer_model(
+                model=model,
+                dataset=dataset,
+                config=ValidationConfig(
+                    d3pm_sample_ts=ts,
+                    boundary_decoding_threshold=seg_threshold,
+                    boundary_decoding_radius=round(seg_radius / model.timestep),
+                    note_presence_threshold=est_threshold,
+                ),
+                batch_size=int(batch_size),
+                num_workers=0,
+                callbacks=callbacks,
+            )
+        elif engine == "ONNX":
+            align_with_transcriptions(
+                model=model,
+                transcription_paths=paths,
+                language_id=language_id,
+                seg_threshold=seg_threshold,
+                seg_radius=seg_radius,
+                ts=ts,
+                est_threshold=est_threshold,
+                use_wb=not no_wb,
+                inplace=True,
+                save_dir=None,
+                save_name=None,
+                batch_size=int(batch_size),
+            )
 
         # The files in output_dir are now updated
         updated_files = list(output_dir.glob("*.csv"))
@@ -280,9 +332,13 @@ with gr.Blocks(title="GAME: 生成式自适应 MIDI 提取器") as demo:
     gr.Markdown("将歌声转换为乐谱（MIDI）。基于 D3PM 模型。支持提取原始音频和对齐 DiffSinger 数据集。")
     
     with gr.Row():
-        model_path_input = gr.Textbox(label="模型权重路径 (Model Checkpoint)", placeholder="/path/to/model.ckpt", value="experiments/model.ckpt", scale=3)
+        model_path_input = gr.Textbox(label="模型路径 (Model Checkpoint / ONNX Dir)", placeholder="/path/to/model.pt 或 /path/to/onnx_dir", value="experiments/model.pt", scale=3)
         language_input = gr.Textbox(label="语言代码 (选填, 例如: zh)", placeholder="zh", scale=1)
         
+    with gr.Row():
+        engine_radio = gr.Radio(choices=["PyTorch", "ONNX"], value="PyTorch", label="推理引擎 (Inference Engine)")
+        onnx_device_radio = gr.Radio(choices=["dml", "cpu"], value="dml", label="ONNX 设备 (Device, 仅 ONNX 引擎有效)", visible=True)
+
     with gr.Accordion("⚙️ 高级模型参数 (Advanced Parameters)", open=False):
         with gr.Row():
             with gr.Column():
@@ -292,8 +348,9 @@ with gr.Blocks(title="GAME: 生成式自适应 MIDI 提取器") as demo:
                 t0_slider = gr.Slider(minimum=0.0, maximum=0.99, value=0.0, step=0.01, label="D3PM 起始 T 值 (Starting t0)")
                 nsteps_slider = gr.Slider(minimum=1, maximum=20, value=8, step=1, label="D3PM 采样步数 (Sampling Steps)")
             with gr.Column():
-                gr.Markdown("### 估计模型 (Estimation Model)")
+                gr.Markdown("### 估计与通用 (Estimation & General)")
                 est_threshold_slider = gr.Slider(minimum=0.01, maximum=0.99, value=0.2, step=0.01, label="音符存在阈值 (Note Presence Threshold)")
+                batch_size_slider = gr.Slider(minimum=1, maximum=32, value=4, step=1, label="批处理大小 (Batch Size)")
 
     with gr.Tabs():
         with gr.TabItem("🎙️ 提取原始音频 (Extract Audio)"):
@@ -326,7 +383,7 @@ with gr.Blocks(title="GAME: 生成式自适应 MIDI 提取器") as demo:
             extract_btn.click(
                 fn=extract_midi,
                 inputs=[
-                    audio_input, model_path_input, language_input,
+                    audio_input, model_path_input, engine_radio, onnx_device_radio, language_input, batch_size_slider,
                     seg_threshold_slider, seg_radius_slider, t0_slider, nsteps_slider, est_threshold_slider,
                     out_mid_cb, out_txt_cb, out_csv_cb, tempo_number, quantize_dropdown, pitch_format_radio, round_pitch_cb
                 ],
@@ -351,13 +408,29 @@ with gr.Blocks(title="GAME: 生成式自适应 MIDI 提取器") as demo:
             align_btn.click(
                 fn=align_transcriptions,
                 inputs=[
-                    csv_input, model_path_input, language_input,
+                    csv_input, model_path_input, engine_radio, onnx_device_radio, language_input, batch_size_slider,
                     seg_threshold_slider, seg_radius_slider, t0_slider, nsteps_slider, est_threshold_slider,
                     no_wb_cb
                 ],
                 outputs=[align_output_file, align_msg]
             )
 
+    def on_engine_change(engine):
+        if engine == "ONNX":
+            return gr.update(value="experiments/GAME-1.0-medium-onnx")
+        else:
+            return gr.update(value="experiments/model.ckpt")
+            
+    engine_radio.change(fn=on_engine_change, inputs=engine_radio, outputs=model_path_input)
+
+    def on_device_change(device):
+        if device == "cpu":
+            return gr.update(value=1)
+        else:
+            return gr.update(value=4)
+            
+    onnx_device_radio.change(fn=on_device_change, inputs=onnx_device_radio, outputs=batch_size_slider)
+
 if __name__ == "__main__":
     print("正在启动 GAME Gradio 界面...")
-    demo.launch(server_name="0.0.0.0", server_port=7860, share=False, css=css)
+    demo.launch(server_name="0.0.0.0", server_port=7860, share=False, inbrowser=True, css=css)
