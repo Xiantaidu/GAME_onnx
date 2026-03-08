@@ -47,34 +47,33 @@ def _t0_nstep_to_ts(t0: float, nsteps: int) -> list[float]:
         for i in range(nsteps)
     ]
 
-# 缓存加载的模型以避免重复加载
-loaded_model = None
-loaded_model_path = None
-loaded_lang_map = None
-loaded_engine = None
-loaded_device = None
+def load_model(model_path_str: str, engine: str, onnx_device: str):
+    model_path = pathlib.Path(model_path_str)
+    if not model_path.exists():
+        raise FileNotFoundError(f"模型路径不存在: {model_path}")
+        
+    if engine == "PyTorch":
+        if not PYTORCH_AVAILABLE:
+            raise ValueError("未安装 PyTorch。请使用 ONNX 引擎。")
+        model, lang_map = load_inference_model(model_path)
+    elif engine == "ONNX":
+        model = load_onnx_model(model_path, device=onnx_device)
+        lang_map = model.languages
+    else:
+        raise ValueError(f"不支持的引擎: {engine}")
+        
+    return model, lang_map
 
-def load_model_if_needed(model_path_str: str, engine: str, onnx_device: str):
-    global loaded_model, loaded_model_path, loaded_lang_map, loaded_engine, loaded_device
-    if (model_path_str != loaded_model_path) or (engine != loaded_engine) or (engine == "ONNX" and onnx_device != loaded_device):
-        model_path = pathlib.Path(model_path_str)
-        if not model_path.exists():
-            raise FileNotFoundError(f"模型路径不存在: {model_path}")
-            
-        if engine == "PyTorch":
-            if not PYTORCH_AVAILABLE:
-                raise ValueError("未安装 PyTorch。请使用 ONNX 引擎。")
-            loaded_model, loaded_lang_map = load_inference_model(model_path)
-        elif engine == "ONNX":
-            loaded_model = load_onnx_model(model_path, device=onnx_device)
-            loaded_lang_map = loaded_model.languages
-        else:
-            raise ValueError(f"不支持的引擎: {engine}")
-            
-        loaded_model_path = model_path_str
-        loaded_engine = engine
-        loaded_device = onnx_device
-    return loaded_model, loaded_lang_map
+def release_memory():
+    import gc
+    gc.collect()
+    if PYTORCH_AVAILABLE:
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
 
 def extract_midi(
     audio_files,
@@ -96,6 +95,7 @@ def extract_midi(
     pitch_format,
     round_pitch
 ):
+    model = None
     try:
         if not audio_files:
             return None, "请至少上传一个音频文件。"
@@ -125,7 +125,7 @@ def extract_midi(
             filemap[filename] = original_path
 
         # Load model
-        model, lang_map = load_model_if_needed(model_path_str, engine, onnx_device)
+        model, lang_map = load_model(model_path_str, engine, onnx_device)
         language_id = _get_language_id(language, lang_map)
 
         ts = _t0_nstep_to_ts(t0, int(nsteps))
@@ -229,6 +229,12 @@ def extract_midi(
 
     except Exception as e:
         return None, f"发生错误: {str(e)}"
+    finally:
+        if model is not None:
+            if hasattr(model, 'release'):
+                model.release()
+            del model
+        release_memory()
 
 def align_transcriptions(
     csv_files,
@@ -244,6 +250,7 @@ def align_transcriptions(
     est_threshold,
     no_wb
 ):
+    model = None
     try:
         if not csv_files:
             return None, "请上传至少一个 DiffSinger 转录 CSV 文件。"
@@ -267,7 +274,7 @@ def align_transcriptions(
             paths.append(dest_path)
 
         # Load model
-        model, lang_map = load_model_if_needed(model_path_str, engine, onnx_device)
+        model, lang_map = load_model(model_path_str, engine, onnx_device)
         language_id = _get_language_id(language, lang_map)
 
         ts = _t0_nstep_to_ts(t0, int(nsteps))
@@ -338,6 +345,12 @@ def align_transcriptions(
 
     except Exception as e:
         return None, f"发生错误: {str(e)}"
+    finally:
+        if model is not None:
+            if hasattr(model, 'release'):
+                model.release()
+            del model
+        release_memory()
 
 # Custom CSS
 css = """

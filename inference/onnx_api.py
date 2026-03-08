@@ -81,6 +81,14 @@ class ONNXInferenceModel:
         self.bd2dur = ort.InferenceSession(
             (model_dir / "bd2dur.onnx").as_posix(), sess_options=sess_options, providers=providers
         )
+
+    def release(self):
+        """Explicitly release ONNX sessions to free memory/VRAM immediately."""
+        if hasattr(self, 'encoder'): del self.encoder
+        if hasattr(self, 'segmenter'): del self.segmenter
+        if hasattr(self, 'estimator'): del self.estimator
+        if hasattr(self, 'dur2bd'): del self.dur2bd
+        if hasattr(self, 'bd2dur'): del self.bd2dur
     
     def infer_batch(
         self,
