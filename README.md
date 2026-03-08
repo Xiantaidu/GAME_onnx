@@ -35,11 +35,13 @@ pip install -r requirements.txt
 
 Step 4: If you want to use pretrained models, download them from [releases](https://github.com/openvpi/GAME/releases) or [discussions](https://github.com/openvpi/GAME/discussions).
 
+> **Note for ONNX Users:** The pure ONNX inference script (`infer_onnx.py`) requires `onnxruntime`. If you plan to use it, you must install the appropriate version for your hardware manually (e.g., `pip install onnxruntime` for CPU, or `pip install onnxruntime-directml` for DirectML GPU support on Windows). It is not included in `requirements.txt` by default to keep the standard PyTorch installation clean.
+
 ## Inference
 
 ### Inference with ONNX models
 
-For users who want to run inference without PyTorch dependencies, or want to leverage hardware acceleration like DirectML on Windows, a pure ONNX inference script is provided.
+For users who want to run inference without PyTorch dependencies, or want to leverage hardware acceleration like DirectML on Windows, a pure ONNX inference script is provided. It achieves the same accuracy as the PyTorch version while offering better portability.
 
 ```bash
 python infer_onnx.py extract [path-or-directory] -m [onnx-model-dir] --device [dml|cpu]
