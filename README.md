@@ -19,6 +19,14 @@ GAME is the upgraded successor of [SOME](https://github.com/openvpi/SOME), desig
 2. Align notes to labeled word boundaries, in dataset processing scenarios.
 3. Estimate note pitches from note boundaries adjusted by user in interactive tuning tools.
 
+## Quick Start (Windows Portable Package)
+
+If you are using Windows and want a quick start, you can download the out-of-the-box portable package:
+
+**[Link to the portable package goes here]**
+
+> **Note**: The portable package provided by this repository does NOT include PyTorch-related components and only supports pure ONNX inference. If you need to use PyTorch, please install dependencies from `requirements.txt` manually.
+
 ## Installation
 
 GAME is tested under Python 3.12, PyTorch 2.8.0, CUDA 12.9, Lightning 2.6.1. But it should have good compatibility.
@@ -50,6 +58,15 @@ python infer_onnx.py extract [path-or-directory] -m [onnx-model-dir] --device [d
 The `infer_onnx.py` script provides the exact same command-line interface as the PyTorch-based `infer.py`. The key differences are:
 1. The `-m` argument must point to a **directory** containing the exported `.onnx` models and `config.json`, rather than a `.ckpt` file.
 2. A new `--device` option is available to select the execution provider (`dml` for DirectML GPU acceleration, or `cpu`).
+
+**ONNX VRAM Recommendations (For `medium` models):**
+
+| Device | VRAM | Recommended `batch_size` |
+| :--- | :--- | :--- |
+| DML (GPU) | 8 GB | 4 |
+| DML (GPU) | 6 GB | 2 |
+| DML (GPU) | <= 4 GB | 1 |
+| CPU | Any | 1 |
 
 ### Transcribe raw audio files
 

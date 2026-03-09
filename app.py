@@ -404,13 +404,15 @@ with gr.Blocks(title="GAME: 生成式自适应 MIDI 提取器") as demo:
                         pitch_format_radio = gr.Radio(choices=["name", "number"], value="name", label="音高格式 (用于 Text/CSV)")
                         round_pitch_cb = gr.Checkbox(label="音高取整 (Round Pitch)", value=False)
                         
-                    extract_btn = gr.Button("🚀 提取 MIDI", variant="primary")
+                    with gr.Row():
+                        extract_btn = gr.Button("🚀 提取 MIDI", variant="primary")
+                        extract_stop_btn = gr.Button("🛑 强制停止", variant="stop")
                     
                 with gr.Column(scale=1):
                     extract_output_file = gr.File(label="下载提取结果 (Download Result)")
                     extract_msg = gr.Textbox(label="状态信息 (Status)", interactive=False)
 
-            extract_btn.click(
+            extract_event = extract_btn.click(
                 fn=extract_midi,
                 inputs=[
                     audio_input, model_path_input, engine_radio, onnx_device_radio, language_input, batch_size_slider,
@@ -419,6 +421,7 @@ with gr.Blocks(title="GAME: 生成式自适应 MIDI 提取器") as demo:
                 ],
                 outputs=[extract_output_file, extract_msg]
             )
+            extract_stop_btn.click(fn=None, cancels=[extract_event])
 
         with gr.TabItem("📝 对齐数据集 (Align Datasets)"):
             gr.Markdown("处理 DiffSinger 数据集格式。生成带有词边界的对齐音符标签。")
@@ -429,13 +432,15 @@ with gr.Blocks(title="GAME: 生成式自适应 MIDI 提取器") as demo:
                     with gr.Accordion("对齐选项 (Alignment Options)", open=True):
                         no_wb_cb = gr.Checkbox(label="禁用词边界 (Disable Word Boundaries / no-wb)", value=False, info="不推荐勾选。如果勾选，将不检查和使用 'ph_num' 字段。")
                         
-                    align_btn = gr.Button("⚡ 开始对齐", variant="primary")
+                    with gr.Row():
+                        align_btn = gr.Button("⚡ 开始对齐", variant="primary")
+                        align_stop_btn = gr.Button("🛑 强制停止", variant="stop")
                     
                 with gr.Column(scale=1):
                     align_output_file = gr.File(label="下载更新后的 CSV")
                     align_msg = gr.Textbox(label="状态信息 (Status)", interactive=False)
 
-            align_btn.click(
+            align_event = align_btn.click(
                 fn=align_transcriptions,
                 inputs=[
                     csv_input, model_path_input, engine_radio, onnx_device_radio, language_input, batch_size_slider,
@@ -444,12 +449,13 @@ with gr.Blocks(title="GAME: 生成式自适应 MIDI 提取器") as demo:
                 ],
                 outputs=[align_output_file, align_msg]
             )
+            align_stop_btn.click(fn=None, cancels=[align_event])
 
     def on_engine_change(engine):
         if engine == "ONNX":
             return gr.update(value="experiments/GAME-1.0-medium-onnx")
         else:
-            return gr.update(value="experiments/model.ckpt")
+            return gr.update(value="experiments/model.pt")
             
     engine_radio.change(fn=on_engine_change, inputs=engine_radio, outputs=model_path_input)
 
