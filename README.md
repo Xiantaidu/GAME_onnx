@@ -89,7 +89,7 @@ python infer.py align --help
 
 #### Important notice for v/uv flags and word-note alignment
 
-Word boundaries have a slightly different definition between DiffSinger and GAME:
+Word boundaries have slightly different definitions between DiffSinger and GAME:
 
 - In DiffSinger, some special unvoiced tags like `AP` (breathing) and `SP` (space) are considered as independent words, with boundaries between them.
 - In GAME, consecutive unvoiced notes are merged into whole unvoiced regions, with no boundaries inside.
