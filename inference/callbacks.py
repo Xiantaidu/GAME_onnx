@@ -14,7 +14,9 @@ import torch
 import torch.nn.functional as F
 
 from inference.me_infer_module import InferenceModule
+from inference.utils import validate_phones, parse_words, align_notes_to_words
 from lib import logging
+from lib.plot import note_to_figure
 
 __all__ = [
     "SaveCombinedFileCallback",
@@ -24,8 +26,6 @@ __all__ = [
     "VisualizeNoteComparisonCallback",
     "ExportMetricSummaryCallback",
 ]
-
-from lib.plot import note_to_figure
 
 
 @dataclass
@@ -205,6 +205,10 @@ class UpdateDiffSingerTranscriptionsCallback(lightning.pytorch.callbacks.Callbac
             overwrite: bool = False,
             save_dir: str | pathlib.Path = None,
             save_filename: str = "transcriptions-midi.csv",
+            use_wb: bool = True,
+            uv_vocab: set[str] | None = None,
+            uv_word_cond: Literal["lead", "all"] = "all",
+            uv_note_cond: Literal["predict", "follow"] = "predict",
     ):
         super().__init__()
         self.overwrite = overwrite
@@ -212,6 +216,14 @@ class UpdateDiffSingerTranscriptionsCallback(lightning.pytorch.callbacks.Callbac
             save_dir = pathlib.Path(save_dir)
         self.save_dir = save_dir
         self.save_filename = save_filename
+        self.use_wb = use_wb
+        if uv_word_cond not in ("lead", "all"):
+            raise ValueError(f"Invalid uv_word_cond: '{uv_word_cond}'. Must be 'lead' or 'all'.")
+        if uv_note_cond not in ("predict", "follow"):
+            raise ValueError(f"Invalid uv_note_cond: '{uv_note_cond}'. Must be 'predict' or 'follow'.")
+        self.uv_vocab = uv_vocab
+        self.uv_word_cond = uv_word_cond
+        self.uv_note_cond = uv_note_cond
         self.index_map: dict[str, OrderedDict[str, dict[str, Any]]] = {}
         self.lengths: dict[str, int] = {}
         self.counters: dict[str, int] = {}
@@ -242,17 +254,58 @@ class UpdateDiffSingerTranscriptionsCallback(lightning.pytorch.callbacks.Callbac
             scores = outputs["scores"][i]
             presence = outputs["presence"][i]
             valid = durations > 0
-            durations = durations[valid].tolist()
-            scores = scores[valid].tolist()
-            presence = presence[valid].tolist()
-            note_seq = [
-                librosa.midi_to_note(score, unicode=False, cents=True) if presence else "rest"
-                for score, presence in zip(scores, presence)
-            ]
-            note_dur = [f"{dur:.3f}" for dur in durations]
+
+            note_dur = durations[valid].tolist()
+            note_midi = scores[valid].tolist()
+            note_vuv = presence[valid].tolist()
+
             item = self.index_map[index][name]
+            if self.use_wb:
+                if self.uv_note_cond == "follow":
+                    # When "follow", defer v/uv to align_notes_to_words; use raw pitch for all notes.
+                    note_seq = [
+                        librosa.midi_to_note(midi, unicode=False, cents=True)
+                        for midi in note_midi
+                    ]
+                else:  # "predict"
+                    # When "predict", apply presence-based "rest" now so alignment preserves them.
+                    note_seq = [
+                        librosa.midi_to_note(midi, unicode=False, cents=True) if vuv else "rest"
+                        for midi, vuv in zip(note_midi, note_vuv)
+                    ]
+                ph_seq = item["ph_seq"].split()
+                ph_dur = [float(d) for d in item["ph_dur"].split()]
+                ph_num = [int(n) for n in item["ph_num"].split()]
+                is_valid, err_msg = validate_phones(ph_seq, ph_dur, ph_num)
+                if not is_valid:
+                    raise ValueError(
+                        f"Invalid phone sequence in item \'{name}\' in index \'{index}\': {err_msg}"
+                    )
+                word_dur, word_vuv = parse_words(
+                    ph_seq, ph_dur, ph_num,
+                    uv_vocab=self.uv_vocab,
+                    uv_cond=self.uv_word_cond,
+                    merge_consecutive_uv=False,
+                )
+                note_seq, note_dur, note_slur = align_notes_to_words(
+                    word_dur, word_vuv,
+                    note_seq, note_dur,
+                    apply_word_uv=(self.uv_note_cond == "follow"),
+                )
+            else:
+                # No alignment: apply presence-based "rest" directly from model output.
+                note_seq = [
+                    librosa.midi_to_note(score, unicode=False, cents=True) if pres else "rest"
+                    for score, pres in zip(note_midi, note_vuv)
+                ]
+                note_slur = None
+
             item["note_seq"] = " ".join(note_seq)
-            item["note_dur"] = " ".join(note_dur)
+            item["note_dur"] = " ".join(f"{dur:.3f}" for dur in note_dur)
+            if note_slur is None:
+                item.pop("note_slur", None)
+            else:
+                item["note_slur"] = " ".join(str(s) for s in note_slur)
             item.pop("note_glide", None)
             self.counters[index] += 1
             if self.counters[index] >= self.lengths[index]:

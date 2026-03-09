@@ -83,7 +83,7 @@ class SegmentationEstimationInferenceModel(nn.Module):
             threshold=threshold,
         )
         presence = presence & n_mask
-        scores = scores * presence.float()
+        scores = scores * n_mask.float()
         return presence, scores
 
     def forward_encoder_main(

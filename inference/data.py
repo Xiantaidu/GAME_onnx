@@ -1,11 +1,12 @@
 import csv
 import pathlib
-from typing import Any
+from typing import Any, Literal
 
 import librosa
 import torch.utils.data
 
 from inference.slicer2 import Slicer
+from inference.utils import validate_phones, parse_words
 from training.data import collate_nd
 
 
@@ -75,6 +76,8 @@ class DiffSingerTranscriptionsDataset(torch.utils.data.Dataset):
             extensions: list[str] = None,
             language: int = 0,
             use_wb: bool = True,
+            uv_vocab: set[str] | None = None,
+            uv_word_cond: Literal["lead", "all"] = "all",
     ):
         self.samplerate = samplerate
         if extensions is None:
@@ -82,6 +85,10 @@ class DiffSingerTranscriptionsDataset(torch.utils.data.Dataset):
         self.extensions = extensions
         self.language = language
         self.use_wb = use_wb
+        if uv_word_cond not in ("lead", "all"):
+            raise ValueError(f"Invalid uv_word_cond: '{uv_word_cond}'. Must be 'lead' or 'all'.")
+        self.uv_vocab = uv_vocab
+        self.uv_word_cond = uv_word_cond
         self.filelist = filelist
         self.itemlist = []
         for index in filelist:
@@ -110,17 +117,19 @@ class DiffSingerTranscriptionsDataset(torch.utils.data.Dataset):
             )
         ph_dur = [float(d) for d in item["ph_dur"].split()]
         if self.use_wb:
+            ph_seq = item["ph_seq"].split()
             ph_num = [int(n) for n in item["ph_num"].split()]
-            if sum(ph_num) != len(ph_dur):
+            is_valid, err_msg = validate_phones(ph_seq, ph_dur, ph_num)
+            if not is_valid:
                 raise ValueError(
-                    f"Length mismatch in item \'{name}\' in index \'{index.as_posix()}\': "
-                    f"sum(ph_num) = {sum(ph_num)}, len(ph_dur) = {len(ph_dur)}."
+                    f"Invalid phone sequence in item \'{name}\' in index \'{index.as_posix()}\': {err_msg}"
                 )
-            word_dur = []
-            idx = 0
-            for num in ph_num:
-                word_dur.append(sum(ph_dur[idx: idx + num]))
-                idx += num
+            word_dur, _ = parse_words(
+                ph_seq, ph_dur, ph_num,
+                uv_vocab=self.uv_vocab,
+                uv_cond=self.uv_word_cond,
+                merge_consecutive_uv=self.uv_vocab is not None,
+            )
         else:
             word_dur = [sum(ph_dur)]
         return {

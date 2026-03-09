@@ -58,6 +58,17 @@ def _validate_output_formats(ctx, param, value) -> set[str]:
 
 
 # noinspection PyUnusedLocal
+def _validate_uv_vocab(ctx, param, value) -> set[str] | None:
+    if value is None:
+        return None
+    try:
+        vocab = {v.strip() for v in value.split(",") if v.strip()}
+        return vocab
+    except Exception as e:
+        raise click.BadParameter(f"Invalid UV vocab: {e}")
+
+
+# noinspection PyUnusedLocal
 def _validate_path_or_glob(ctx, param, value) -> str:
     try:
         paths = []
@@ -206,10 +217,7 @@ def shared_options(func=None, *, defaults: dict[str, Any] = None):
         exists=True, dir_okay=True, file_okay=True, readable=True, path_type=pathlib.Path
     ),
 )
-@shared_options(defaults={
-    _OPT_KEY_SEG_D3PM_T0: 0.0,
-    _OPT_KEY_SEG_D3PM_NSTEPS: 8,
-})
+@shared_options(defaults={})
 @click.option(
     "--input-formats", type=str, default="wav,flac,mp3,aac,ogg", show_default=True,
     callback=_validate_exts,
@@ -357,10 +365,7 @@ def extract(
     "paths", type=str, nargs=-1, metavar="PATH_OR_GLOB",
     callback=_validate_path_or_glob,
 )
-@shared_options(defaults={
-    _OPT_KEY_SEG_D3PM_T0: 0.5,
-    _OPT_KEY_SEG_D3PM_NSTEPS: 4,
-})
+@shared_options(defaults={})
 @click.option(
     "--save-path", type=click.Path(
         file_okay=True, dir_okay=False, writable=True, path_type=pathlib.Path
@@ -385,10 +390,44 @@ def extract(
     )
 )
 @click.option(
+    "--uv-vocab", type=str, default="AP,SP,br,sil", show_default=True,
+    callback=_validate_uv_vocab,
+    help=(
+        "Comma-separated list of unvoiced phoneme names."
+    )
+)
+@click.option(
+    "--uv-vocab-path", type=click.Path(
+        exists=True, dir_okay=False, file_okay=True, readable=True, path_type=pathlib.Path
+    ),
+    default=None, show_default=False,
+    help=(
+        "Path to a file containing unvoiced phoneme names separated by whitespace. "
+        "Overrides --uv-vocab if provided."
+    )
+)
+@click.option(
+    "--uv-word-cond", type=click.Choice(["lead", "all"]),
+    default="lead", show_default=True,
+    help=(
+        "Condition for determining whether a word is unvoiced. "
+        "'lead' checks only the leading phoneme; "
+        "'all' requires all phonemes to be unvoiced."
+    )
+)
+@click.option(
+    "--uv-note-cond", type=click.Choice(["predict", "follow"]),
+    default="predict", show_default=True,
+    help=(
+        "Condition for determining whether a note is unvoiced. "
+        "'predict' uses the raw model output; "
+        "'follow' aligns note v/uv with the word it belongs to."
+    )
+)
+@click.option(
     "--no-wb", is_flag=True, default=False, show_default=True,
     help=(
-            "Whether to disable word boundaries for better alignment. "
-            "If set, \'ph_num\' field will not be checked and used. Not recommended."
+            "Whether to disable word-note alignment. Not recommended."
     )
 )
 def align(
@@ -407,6 +446,10 @@ def align(
         save_name: str,
         overwrite: bool,
         no_wb: bool,
+        uv_vocab: set[str],
+        uv_vocab_path: pathlib.Path,
+        uv_word_cond: str,
+        uv_note_cond: str,
 ):
     if len(paths) > 1:
         save_path = None
@@ -425,6 +468,16 @@ def align(
                     raise FileExistsError(f"Output file already exists: {output_file}")
     save_dir = save_path.parent if save_path else None
     use_wb = not no_wb
+    # --uv-vocab-path overrides --uv-vocab; suppress UV logic when --no-wb
+    if uv_vocab_path is not None:
+        uv_vocab = set(uv_vocab_path.read_text(encoding="utf8").split())
+    resolved_uv_vocab = uv_vocab if use_wb else None
+    if use_wb and uv_note_cond == "follow" and not resolved_uv_vocab:
+        logging.warning(
+            "--uv-note-cond follow is set but the UV vocab is empty, so all words are "
+            "treated as voiced and all notes will be forced voiced. This is not expected "
+            "in most cases. Please check --uv-vocab and --uv-vocab-path options."
+        )
 
     from lightning_utilities.core.rank_zero import rank_zero_info
     from inference.api import (
@@ -443,6 +496,8 @@ def align(
         samplerate=sr,
         language=language_id,
         use_wb=use_wb,
+        uv_vocab=resolved_uv_vocab,
+        uv_word_cond=uv_word_cond,
     )
     callbacks = [
         UpdateDiffSingerTranscriptionsCallback(
@@ -450,6 +505,10 @@ def align(
             overwrite=inplace,
             save_dir=save_dir,
             save_filename=save_name,
+            use_wb=use_wb,
+            uv_vocab=resolved_uv_vocab,
+            uv_word_cond=uv_word_cond,
+            uv_note_cond=uv_note_cond,
         )
     ]
     # noinspection PyArgumentList
