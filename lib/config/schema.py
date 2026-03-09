@@ -330,7 +330,7 @@ class ValidationConfig(ConfigBaseModel):
     parallel_dirty_metrics: bool = Field(True)
     d3pm_sample_t0: float = Field(0.0, ge=0)
     d3pm_sample_steps: int = Field(8, gt=0)
-    d3pm_sample_ts: list[float] = Field(None)
+    d3pm_sample_ts: list[float] | None = Field(None)
     boundary_decoding_threshold: float = Field(0.3, gt=0, le=1)
     boundary_decoding_radius: int = Field(2, gt=0)
     boundary_matching_tolerance: int = Field(5, ge=0)
@@ -340,6 +340,8 @@ class ValidationConfig(ConfigBaseModel):
 
     @property
     def d3pm_sample_ts_resolved(self):
+        if self.d3pm_sample_ts is not None:
+            return self.d3pm_sample_ts
         step = (1 - self.d3pm_sample_t0) / self.d3pm_sample_steps
         return [
             self.d3pm_sample_t0 + i * step

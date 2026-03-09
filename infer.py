@@ -82,14 +82,6 @@ def _validate_path_or_glob(ctx, param, value) -> str:
         raise click.BadParameter(f"Invalid path or glob: {e}")
 
 
-def _t0_nstep_to_ts(t0: float, nsteps: int) -> list[float]:
-    step = (1 - t0) / nsteps
-    return [
-        t0 + i * step
-        for i in range(nsteps)
-    ]
-
-
 def _get_language_id(language: str, lang_map: dict[str, int]) -> int:
     if language and lang_map:
         if language not in lang_map:
@@ -289,8 +281,6 @@ def extract(
         tempo: float,
         output_dir: pathlib.Path,
 ):
-    if ts is None:
-        ts = _t0_nstep_to_ts(t0, nsteps)
     filemap = _parse_filemap(path, input_formats, glb)
     if output_dir is None:
         output_dir = path if path.is_dir() else path.parent
@@ -345,6 +335,8 @@ def extract(
         model=model,
         dataset=dataset,
         config=ValidationConfig(
+            d3pm_sample_t0=t0,
+            d3pm_sample_steps=nsteps,
             d3pm_sample_ts=ts,
             boundary_decoding_threshold=seg_threshold,
             boundary_decoding_radius=round(seg_radius / model.timestep),
@@ -416,8 +408,6 @@ def align(
         overwrite: bool,
         no_wb: bool,
 ):
-    if ts is None:
-        ts = _t0_nstep_to_ts(t0, nsteps)
     if len(paths) > 1:
         save_path = None
     if save_path is not None:
@@ -467,6 +457,8 @@ def align(
         model=model,
         dataset=dataset,
         config=ValidationConfig(
+            d3pm_sample_t0=t0,
+            d3pm_sample_steps=nsteps,
             d3pm_sample_ts=ts,
             boundary_decoding_threshold=seg_threshold,
             boundary_decoding_radius=round(seg_radius / model.timestep),

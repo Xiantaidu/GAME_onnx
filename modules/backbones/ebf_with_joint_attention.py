@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
+from deployment.context import is_export_mode
 from modules.backbones.EBF import CgMLP, GLUFFN, FFN, LayScale
 from modules.backbones.eglu import HalfCacheGLUFFN
 
@@ -32,6 +33,14 @@ def apply_rotary_by_positions(x, positions, inv_freq):
     freqs_cos = freqs_cos.view(shape)
     freqs_sin = freqs_sin.view(shape)
     return single_apply_rotary_emb(x, freqs_cos, freqs_sin)
+
+
+def fill_with_attn_mask(x, attn_mask):
+    # In some buggy ONNX exporting logic, fully masked queries may produce NaN.
+    # We fix this by manually filling zeros to match the PyTorch native behavior.
+    if is_export_mode():
+        x = torch.where(attn_mask.any(dim=-2).unsqueeze(-1), x, 0)
+    return x
 
 
 class RegionRoPE(nn.Module):
@@ -316,6 +325,7 @@ class JointAttention(nn.Module):
             q, k, v, attn_mask=attn_mask,
             dropout_p=self.dropout_attn if self.training else 0.0,
         )
+        out = fill_with_attn_mask(out, attn_mask)
 
         pool_attn = rearrange(out[:, :, :P, :], 'b h t d -> b t (h d)')
         x_attn = rearrange(out[:, :, P:, :], 'b h t d -> b t (h d)')
@@ -525,21 +535,27 @@ class SplitJointAttention(nn.Module):
 
         # --- 1. pool -> pool (same-stream with RoPE) ---
         pp_out = F.scaled_dot_product_attention(pool_q_r, pool_k_r, pool_v, attn_mask=pp_mask, dropout_p=dp)
+        pp_out = fill_with_attn_mask(pp_out, pp_mask)
 
         # --- 2. x -> x (same-stream with RoPE) ---
         xx_out = F.scaled_dot_product_attention(x_q_r, x_k_r, x_v, attn_mask=xx_mask, dropout_p=dp)
+        xx_out = fill_with_attn_mask(xx_out, xx_mask)
 
         # # --- 3. pool -> x (cross-stream, NO RoPE, use mask only) ---
         # px_out = F.scaled_dot_product_attention(pool_q, x_k, x_v, attn_mask=px_mask, dropout_p=dp)
+        # px_out = fill_with_attn_mask(px_out, px_mask)
         #
         # # --- 4. x -> pool (cross-stream, NO RoPE, use mask only) ---
         # xp_out = F.scaled_dot_product_attention(x_q, pool_k, pool_v, attn_mask=xp_mask, dropout_p=dp)
+        # xp_out = fill_with_attn_mask(xp_out, xp_mask)
 
         # --- 3. pool -> x (cross-stream, NO RoPE, use mask only) ---
         px_out = F.scaled_dot_product_attention(pool_q_r, x_k_r, x_v, attn_mask=px_mask, dropout_p=dp)
+        px_out = fill_with_attn_mask(px_out, px_mask)
 
         # --- 4. x -> pool (cross-stream, NO RoPE, use mask only) ---
         xp_out = F.scaled_dot_product_attention(x_q_r, pool_k_r, pool_v, attn_mask=xp_mask, dropout_p=dp)
+        xp_out = fill_with_attn_mask(xp_out, xp_mask)
 
         # Combine: learnable merge of same-stream + cross-stream
         pp_flat = rearrange(pp_out, 'b h t d -> b t (h d)')
