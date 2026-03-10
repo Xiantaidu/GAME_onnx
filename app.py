@@ -495,15 +495,14 @@ with gr.Blocks(title="GAME: 生成式自适应 MIDI 提取器") as demo:
 if __name__ == "__main__":
     print("正在启动 GAME Gradio 界面...")
     
-    import socket
     port = 7860
     while port < 7960:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.bind(("0.0.0.0", port))
-                break
-            except OSError:
+        try:
+            demo.launch(server_name="0.0.0.0", server_port=port, share=False, inbrowser=True, css=css)
+            break
+        except OSError as e:
+            if "Cannot find empty port" in str(e) or "already in use" in str(e).lower():
                 print(f"端口 {port} 被占用，尝试端口 {port + 1}...")
                 port += 1
-                
-    demo.launch(server_name="0.0.0.0", server_port=port, share=False, inbrowser=True, css=css)
+            else:
+                raise e
