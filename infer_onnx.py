@@ -62,6 +62,16 @@ def _validate_output_formats(ctx, param, value) -> set[str]:
         raise click.BadParameter(f"Invalid output formats: {e}")
 
 
+def _validate_uv_vocab(ctx, param, value) -> set[str] | None:
+    if value is None:
+        return None
+    try:
+        vocab = {v.strip() for v in value.split(",") if v.strip()}
+        return vocab
+    except Exception as e:
+        raise click.BadParameter(f"Invalid UV vocab: {e}")
+
+
 def _validate_path_or_glob(ctx, param, value) -> list[pathlib.Path]:
     try:
         paths = []
@@ -165,11 +175,29 @@ def extract_cli(path: pathlib.Path, model: pathlib.Path, device: str, **kwargs):
 @click.option("--save-path", type=click.Path(file_okay=True, dir_okay=False, writable=True, path_type=pathlib.Path), help="Output file path (for single input).")
 @click.option("--save-name", type=str, help="Output file name (for multiple inputs).")
 @click.option("--overwrite", is_flag=True, help="Overwrite existing files.")
+@click.option("--uv-vocab", type=str, default="AP,SP,br,sil", show_default=True, callback=_validate_uv_vocab, help="Comma-separated list of unvoiced phoneme names.")
+@click.option("--uv-vocab-path", type=click.Path(exists=True, dir_okay=False, file_okay=True, readable=True, path_type=pathlib.Path), help="Path to a file containing unvoiced phoneme names separated by whitespace. Overrides --uv-vocab if provided.")
+@click.option("--uv-word-cond", type=click.Choice(["lead", "all"]), default="lead", show_default=True, help="Condition for determining whether a word is unvoiced. 'lead' checks only the leading phoneme; 'all' requires all phonemes to be unvoiced.")
+@click.option("--uv-note-cond", type=click.Choice(["predict", "follow"]), default="predict", show_default=True, help="Condition for determining whether a note is unvoiced. 'predict' uses the raw model output; 'follow' aligns note v/uv with the word it belongs to.")
 @click.option("--no-wb", is_flag=True, help="Disable word boundaries.")
 def align_cli(paths: list[pathlib.Path], model: pathlib.Path, device: str, **kwargs):
     ts = kwargs.pop('ts') or _t0_nstep_to_ts(kwargs.pop('t0'), kwargs.pop('nsteps'))
     save_path = kwargs.pop('save_path')
     save_name = kwargs.pop('save_name')
+    
+    use_wb = not kwargs.pop('no_wb')
+    uv_vocab = kwargs.pop('uv_vocab')
+    uv_vocab_path = kwargs.pop('uv_vocab_path')
+    uv_word_cond = kwargs.pop('uv_word_cond')
+    uv_note_cond = kwargs.pop('uv_note_cond')
+
+    if uv_vocab_path is not None:
+        uv_vocab = set(uv_vocab_path.read_text(encoding="utf8").split())
+    resolved_uv_vocab = uv_vocab if use_wb else None
+
+    if use_wb and uv_note_cond == "follow" and not resolved_uv_vocab:
+        print("WARNING: --uv-note-cond follow is set but the UV vocab is empty, so all words are treated as voiced and all notes will be forced voiced. This is not expected in most cases. Please check --uv-vocab and --uv-vocab-path options.")
+
     
     if len(paths) > 1 and save_path:
         print("WARNING: --save-path is ignored when multiple input files are provided.")
@@ -189,10 +217,13 @@ def align_cli(paths: list[pathlib.Path], model: pathlib.Path, device: str, **kwa
         transcription_paths=paths,
         language_id=language_id,
         ts=ts,
-        use_wb=not kwargs.pop('no_wb'),
+        use_wb=use_wb,
         inplace=inplace,
         save_dir=save_dir,
         save_name=save_name or (save_path.name if save_path else None),
+        uv_vocab=resolved_uv_vocab,
+        uv_word_cond=uv_word_cond,
+        uv_note_cond=uv_note_cond,
         **kwargs
     )
     print("\nAlignment completed.")

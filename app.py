@@ -248,7 +248,10 @@ def align_transcriptions(
     t0,
     nsteps,
     est_threshold,
-    no_wb
+    no_wb,
+    uv_vocab_str,
+    uv_word_cond,
+    uv_note_cond
 ):
     model = None
     try:
@@ -273,6 +276,15 @@ def align_transcriptions(
             shutil.copy2(original_path, dest_path)
             paths.append(dest_path)
 
+        # Parse UV options
+        use_wb = not no_wb
+        if uv_vocab_str and uv_vocab_str.strip():
+            uv_vocab = {v.strip() for v in uv_vocab_str.split(",") if v.strip()}
+        else:
+            uv_vocab = None
+        
+        resolved_uv_vocab = uv_vocab if use_wb else None
+
         # Load model
         model, lang_map = load_model(model_path_str, engine, onnx_device)
         language_id = _get_language_id(language, lang_map)
@@ -287,7 +299,9 @@ def align_transcriptions(
                 filelist=paths,
                 samplerate=sr,
                 language=language_id,
-                use_wb=not no_wb,
+                use_wb=use_wb,
+                uv_vocab=resolved_uv_vocab,
+                uv_word_cond=uv_word_cond,
             )
             
             callbacks = [
@@ -296,6 +310,10 @@ def align_transcriptions(
                     overwrite=True, # Overwrite the copied files in our temp dir
                     save_dir=None,
                     save_filename=None,
+                    use_wb=use_wb,
+                    uv_vocab=resolved_uv_vocab,
+                    uv_word_cond=uv_word_cond,
+                    uv_note_cond=uv_note_cond,
                 )
             ]
 
@@ -322,11 +340,14 @@ def align_transcriptions(
                 seg_radius=seg_radius,
                 ts=ts,
                 est_threshold=est_threshold,
-                use_wb=not no_wb,
+                use_wb=use_wb,
                 inplace=True,
                 save_dir=None,
                 save_name=None,
                 batch_size=int(batch_size),
+                uv_vocab=resolved_uv_vocab,
+                uv_word_cond=uv_word_cond,
+                uv_note_cond=uv_note_cond,
             )
 
         # The files in output_dir are now updated
@@ -430,6 +451,10 @@ with gr.Blocks(title="GAME: 生成式自适应 MIDI 提取器") as demo:
                     csv_input = gr.File(label="上传 transcriptions.csv 文件", file_count="multiple", type="filepath")
                     
                     with gr.Accordion("对齐选项 (Alignment Options)", open=True):
+                        uv_vocab_input = gr.Textbox(label="清音音素集 (Unvoiced Vocab)", value="AP,SP,br,sil", info="用逗号分隔的清音音素列表。")
+                        with gr.Row():
+                            uv_word_cond_radio = gr.Radio(choices=["lead", "all"], value="lead", label="清音词判断条件 (UV Word Cond)", info="lead: 首音素为清音; all: 所有音素为清音")
+                            uv_note_cond_radio = gr.Radio(choices=["predict", "follow"], value="predict", label="清音音符判断条件 (UV Note Cond)", info="predict: 模型预测; follow: 跟随词的清浊状态")
                         no_wb_cb = gr.Checkbox(label="禁用词边界 (Disable Word Boundaries / no-wb)", value=False, info="不推荐勾选。如果勾选，将不检查和使用 'ph_num' 字段。")
                         
                     with gr.Row():
@@ -445,7 +470,7 @@ with gr.Blocks(title="GAME: 生成式自适应 MIDI 提取器") as demo:
                 inputs=[
                     csv_input, model_path_input, engine_radio, onnx_device_radio, language_input, batch_size_slider,
                     seg_threshold_slider, seg_radius_slider, t0_slider, nsteps_slider, est_threshold_slider,
-                    no_wb_cb
+                    no_wb_cb, uv_vocab_input, uv_word_cond_radio, uv_note_cond_radio
                 ],
                 outputs=[align_output_file, align_msg]
             )
@@ -469,4 +494,16 @@ with gr.Blocks(title="GAME: 生成式自适应 MIDI 提取器") as demo:
 
 if __name__ == "__main__":
     print("正在启动 GAME Gradio 界面...")
-    demo.launch(server_name="0.0.0.0", server_port=7860, share=False, inbrowser=True, css=css)
+    
+    import socket
+    port = 7860
+    while port < 7960:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("0.0.0.0", port))
+                break
+            except OSError:
+                print(f"端口 {port} 被占用，尝试端口 {port + 1}...")
+                port += 1
+                
+    demo.launch(server_name="0.0.0.0", server_port=port, share=False, inbrowser=True, css=css)

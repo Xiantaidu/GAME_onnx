@@ -17,6 +17,7 @@ import numpy as np
 import onnxruntime as ort
 
 from inference.slicer2 import Slicer
+from inference.utils import validate_phones, parse_words, align_notes_to_words
 
 
 @dataclass
@@ -513,6 +514,9 @@ def align_with_transcriptions(
     save_dir: pathlib.Path,
     save_name: str,
     batch_size: int = 4,
+    uv_vocab: set[str] | None = None,
+    uv_word_cond: Literal["lead", "all"] = "lead",
+    uv_note_cond: Literal["predict", "follow"] = "predict",
 ):
     boundary_radius_frames = round(seg_radius / model.timestep)
     extensions = [".wav", ".flac"]
@@ -542,22 +546,38 @@ def align_with_transcriptions(
                 continue
 
             ph_dur = [float(d) for d in item["ph_dur"].split()]
-            word_dur = []
-            if use_wb and "ph_num" in item:
+            
+            if use_wb and "ph_num" in item and "ph_seq" in item:
+                ph_seq = item["ph_seq"].split()
                 ph_num = [int(n) for n in item["ph_num"].split()]
-                if sum(ph_num) == len(ph_dur):
-                    idx = 0
-                    for num in ph_num:
-                        word_dur.append(sum(ph_dur[idx : idx + num]))
-                        idx += num
+                is_valid, err_msg = validate_phones(ph_seq, ph_dur, ph_num)
+                if not is_valid:
+                    print(f"  - WARNING: Invalid phone sequence in item '{name}': {err_msg}. Using total duration.")
+                    word_dur_model = [sum(ph_dur)]
+                    word_dur_align = word_dur_model
+                    word_vuv_align = [1]
                 else:
-                    print(f"  - WARNING: ph_num and ph_dur length mismatch for item '{name}'. Using total duration.")
-                    word_dur = [sum(ph_dur)]
+                    word_dur_model, _ = parse_words(
+                        ph_seq, ph_dur, ph_num,
+                        uv_vocab=uv_vocab,
+                        uv_cond=uv_word_cond,
+                        merge_consecutive_uv=uv_vocab is not None,
+                    )
+                    word_dur_align, word_vuv_align = parse_words(
+                        ph_seq, ph_dur, ph_num,
+                        uv_vocab=uv_vocab,
+                        uv_cond=uv_word_cond,
+                        merge_consecutive_uv=False,
+                    )
             else:
-                word_dur = [sum(ph_dur)]
+                word_dur_model = [sum(ph_dur)]
+                word_dur_align = word_dur_model
+                word_vuv_align = [1]
                 
             item['wav_fn'] = wav_fn
-            item['word_dur'] = word_dur
+            item['word_dur'] = word_dur_model
+            item['word_dur_align'] = word_dur_align
+            item['word_vuv_align'] = word_vuv_align
             valid_items.append(item)
 
         # Process valid items in batches
@@ -577,19 +597,50 @@ def align_with_transcriptions(
             
             for chunk_result, item in zip(batch_results, batch_items):
                 durations, presence, scores = chunk_result
+                valid = durations > 0
                 
-                note_seq = [
-                    librosa.midi_to_note(score, unicode=False, cents=True) if pres else "rest"
-                    for score, pres in zip(scores, presence)
-                ]
-                note_dur = [f"{dur:.3f}" for dur in durations]
+                note_dur = durations[valid].tolist()
+                note_midi = scores[valid].tolist()
+                note_vuv = presence[valid].tolist()
+                
+                if use_wb:
+                    if uv_note_cond == "follow":
+                        note_seq = [
+                            librosa.midi_to_note(midi, unicode=False, cents=True)
+                            for midi in note_midi
+                        ]
+                    else:
+                        note_seq = [
+                            librosa.midi_to_note(midi, unicode=False, cents=True) if vuv else "rest"
+                            for midi, vuv in zip(note_midi, note_vuv)
+                        ]
+                    
+                    note_seq, note_dur, note_slur = align_notes_to_words(
+                        item["word_dur_align"], item["word_vuv_align"],
+                        note_seq, note_dur,
+                        apply_word_uv=(uv_note_cond == "follow"),
+                    )
+                else:
+                    note_seq = [
+                        librosa.midi_to_note(score, unicode=False, cents=True) if pres else "rest"
+                        for score, pres in zip(note_midi, note_vuv)
+                    ]
+                    note_slur = None
+                
+                note_dur_str = [f"{dur:.3f}" for dur in note_dur]
                 
                 # Cleanup temporary fields
-                del item['wav_fn']
-                del item['word_dur']
+                item.pop('wav_fn', None)
+                item.pop('word_dur', None)
+                item.pop('word_dur_align', None)
+                item.pop('word_vuv_align', None)
                 
                 item["note_seq"] = " ".join(note_seq)
-                item["note_dur"] = " ".join(note_dur)
+                item["note_dur"] = " ".join(note_dur_str)
+                if note_slur is None:
+                    item.pop("note_slur", None)
+                else:
+                    item["note_slur"] = " ".join(str(s) for s in note_slur)
                 item.pop("note_glide", None)
                 updated_items.append(item)
                 
@@ -608,8 +659,12 @@ def align_with_transcriptions(
                 fieldnames.append("note_seq")
             if "note_dur" not in fieldnames:
                 fieldnames.append("note_dur")
+            if use_wb and "note_slur" not in fieldnames:
+                fieldnames.append("note_slur")
+            elif not use_wb and "note_slur" in fieldnames:
+                fieldnames.remove("note_slur")
             
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
             writer.writeheader()
             writer.writerows(updated_items)
         print(f"  Saved updated transcriptions to: {output_path.as_posix()}")
