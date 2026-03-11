@@ -10,14 +10,14 @@ A `config.json` carries the information needed for ONNX model inference. Structu
 
 ```json5
 {
-    // accepted audio sampling rate
+    // Accepted audio sampling rate
     samplerate: 44100,
-    // time step of each frame, in seconds
+    // Time step of each frame, in seconds
     timestep: 0.01,
-    // language mapping (null if the model doesn't support languages)
+    // Language mapping (null if the model doesn't support languages)
     languages: {
         // 0 = unknown, unset or universal
-        // starting from 1
+        // Starting from 1
         en: 1,
         ja: 2,
         zh: 3,
