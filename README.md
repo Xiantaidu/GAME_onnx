@@ -50,7 +50,7 @@ By default, MIDI files are saved besides each audio file in the same directory. 
 For example, transcribing all WAV files in a directory:
 
 ```bash
-python infer.py extract /path/to/audio/dir/ -m /path/to/model.ckpt --glob *.wav --output-formats mid,txt,csv
+python infer.py extract /path/to/audio/dir/ -m /path/to/model.pt --glob *.wav --output-formats mid,txt,csv
 ```
 
 For detailed descriptions of more functionalities and options, please run the following command:
@@ -70,13 +70,13 @@ python infer.py align [path-or-glob] -m [model-path]
 For example, processing single dataset:
 
 ```bash
-python infer.py align transcriptions.csv -m /path/to/model.ckpt --save-path transcriptions-midi.csv
+python infer.py align transcriptions.csv -m /path/to/model.pt --save-path transcriptions-midi.csv
 ```
 
 Processing all datasets matched by glob pattern:
 
 ```bash
-python infer.py align *.transcriptions.csv -m /path/to/model.ckpt --save-name transcriptions-midi.csv
+python infer.py align *.transcriptions.csv -m /path/to/model.pt --save-name transcriptions-midi.csv
 ```
 
 Prediction results are inserted (or replaced) into the CSV: `note_seq` for note names, `note_dur` for note durations, `note_slur` for slur flags; `note_glude` will be removed from CSV because the model does not support glide types.
